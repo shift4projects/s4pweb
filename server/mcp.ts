@@ -32,7 +32,8 @@ const fields = {
   summary: z.string().min(1).max(1200).describe("One or two sentences describing what Shift 4 did"),
   scope: z.array(z.string().max(120)).max(20).describe("Short scope items, e.g. [\"LED wall\", \"Red carpet lighting\"]"),
   location: z.string().max(160).optional().describe("Venue and city, if known"),
-  credits: z.string().max(240).optional().describe("Production partners or crew, e.g. \"Production: AGENC\""),
+  credits: z.string().max(240).optional().describe("Production partners or crew, e.g. \"Production: AGENC\". To link a name, write it as [Name](https://url), e.g. \"Production: [AGENC](https://www.agen-c.com/)\""),
+  video: z.string().max(300).optional().describe("YouTube or Vimeo link for this project, shown above the photo gallery. Pass an empty string to remove it."),
   featured: z.boolean().optional().describe("Show in Selected work on the home page"),
 };
 

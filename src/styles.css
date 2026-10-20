@@ -468,3 +468,15 @@ section.block { padding: 90px var(--gutter); }
 }
 .glide.ink .btn:hover { background: #0a0a0b; color: var(--ink); }
 .stack-card .bg video, .stack-card .bg .poster { width: 100%; height: 100%; object-fit: cover; opacity: 0.7; }
+
+/* Project video (YouTube/Vimeo), loads the player only on tap */
+.proj-video-wrap { padding: 0 var(--gutter) 12px; }
+.proj-video { position: relative; aspect-ratio: 16 / 9; width: 100%; max-width: calc(88vh * 16 / 9); margin: 0 auto; background: var(--panel-2); overflow: hidden; }
+.proj-video iframe, .proj-video button, .proj-video img { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.proj-video img { object-fit: cover; transition: transform 1s var(--ease), filter .4s; filter: brightness(.8); }
+.proj-video button { cursor: pointer; }
+.proj-video button:hover img { transform: scale(1.02); filter: brightness(.65); }
+.proj-video .play { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 12px; padding: 14px 22px; border: 1px solid rgba(255,255,255,.6); background: rgba(0,0,0,.35); backdrop-filter: blur(6px); color: #fff; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
+.proj-video .play .dot { font-size: 10px; }
+.inline-link { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.inline-link:hover { opacity: .7; }

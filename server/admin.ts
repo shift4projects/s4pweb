@@ -21,6 +21,7 @@ function fieldsFrom(b: Record<string, unknown>, partial: boolean): Partial<Proje
   if (summary !== undefined) out.summary = summary;
   if (b.location !== undefined) out.location = str(b.location, 160) || undefined;
   if (b.credits !== undefined) out.credits = str(b.credits, 240) || undefined;
+  if (b.video !== undefined) out.video = str(b.video, 300) || undefined;
   if (b.featured !== undefined) out.featured = !!b.featured;
   if (Array.isArray(b.disciplines)) out.disciplines = b.disciplines.filter((d) => DISCIPLINES.includes(d as Discipline)) as Discipline[];
   if (Array.isArray(b.scope)) out.scope = b.scope.map((s) => str(s, 120)).filter((s): s is string => !!s).slice(0, 20);

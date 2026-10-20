@@ -4,16 +4,16 @@ import { DISCIPLINES, type Discipline } from "../data/projects";
 import { api, thumb, when, type Fields, type StoredProject, type Version } from "./api";
 import { move, useDragSort } from "./sort";
 
-type Form = { client: string; title: string; disciplines: Discipline[]; summary: string; scope: string; location: string; credits: string; featured: boolean };
-const EMPTY: Form = { client: "", title: "", disciplines: [], summary: "", scope: "", location: "", credits: "", featured: false };
+type Form = { client: string; title: string; disciplines: Discipline[]; summary: string; scope: string; location: string; credits: string; video: string; featured: boolean };
+const EMPTY: Form = { client: "", title: "", disciplines: [], summary: "", scope: "", location: "", credits: "", video: "", featured: false };
 
 const toForm = (p: StoredProject): Form => ({
   client: p.client, title: p.title, disciplines: p.disciplines, summary: p.summary, scope: p.scope.join("\n"),
-  location: p.location ?? "", credits: p.credits ?? "", featured: !!p.featured,
+  location: p.location ?? "", credits: p.credits ?? "", video: p.video ?? "", featured: !!p.featured,
 });
 const toFields = (f: Form): Fields => ({
   client: f.client, title: f.title, disciplines: f.disciplines, summary: f.summary,
-  scope: f.scope.split("\n").map((s) => s.trim()).filter(Boolean), location: f.location, credits: f.credits, featured: f.featured,
+  scope: f.scope.split("\n").map((s) => s.trim()).filter(Boolean), location: f.location, credits: f.credits, video: f.video, featured: f.featured,
 });
 
 type Msg = { text: string; err?: boolean } | null;
@@ -153,7 +153,8 @@ export default function Editor({ onAuth }: { onAuth: (e: unknown) => void }) {
         <label><span className="lbl">Scope <em>one per line</em></span><textarea value={form.scope} onChange={(e) => set("scope", e.target.value)} rows={4} placeholder={"LED wall\nRed carpet lighting"} /></label>
         <div className="two">
           <label><span className="lbl">Location</span><input value={form.location} onChange={(e) => set("location", e.target.value)} maxLength={160} placeholder="Venue, city" /></label>
-          <label><span className="lbl">Credits</span><input value={form.credits} onChange={(e) => set("credits", e.target.value)} maxLength={240} placeholder="Production: …" /></label>
+          <label><span className="lbl">Credits</span><input value={form.credits} onChange={(e) => set("credits", e.target.value)} maxLength={240} placeholder="Production: [AGENC](https://www.agen-c.com/)" /></label>
+          <label><span className="lbl">Video link</span><input value={form.video} onChange={(e) => set("video", e.target.value)} maxLength={300} placeholder="YouTube or Vimeo link (optional)" /></label>
         </div>
         <label className="check"><input type="checkbox" checked={form.featured} onChange={(e) => set("featured", e.target.checked)} /> Show in Selected work on the home page</label>
         {isNew && <label className="check"><input type="checkbox" checked={publish} onChange={(e) => setPublish(e.target.checked)} /> Put it on the site right away (otherwise it stays hidden until you show it)</label>}

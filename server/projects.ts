@@ -66,7 +66,7 @@ const slugify = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[^\w\s
 
 export type ProjectFields = {
   client: string; title: string; disciplines: Discipline[]; summary: string; scope: string[];
-  location?: string; credits?: string; featured?: boolean;
+  location?: string; credits?: string; video?: string; featured?: boolean;
 };
 
 export function createProject(f: ProjectFields & { hidden?: boolean; slug?: string }): StoredProject {

@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { Link, useParams } from "react-router-dom";
 import Reveal from "../components/Reveal";
+import ProjectVideo, { Linked } from "../components/ProjectVideo";
 import { PROJECTS, ratioOf, srcSet, thumb } from "../data/projects";
 import { useTitle } from "../lib/hooks";
 import { useLenis } from "../lib/scroll";
@@ -111,7 +112,7 @@ export default function ProjectPage() {
                   <div><span className="mute">Disciplines</span><span>{p.disciplines.join(" · ")}</span></div>
                   <div><span className="mute">Scope</span><span>{p.scope.join(" / ")}</span></div>
                   {p.location && <div><span className="mute">Location</span><span>{p.location}</span></div>}
-                  {p.credits && <div><span className="mute">Credits</span><span>{p.credits}</span></div>}
+                  {p.credits && <div><span className="mute">Credits</span><span><Linked text={p.credits} /></span></div>}
                 </div>
               </Reveal>
               </div>
@@ -124,6 +125,12 @@ export default function ProjectPage() {
               )}
             </div>
           </section>
+
+          {p.video && (
+            <Reveal y={50} className="proj-video-wrap">
+              <ProjectVideo url={p.video} title={`${p.client}: ${p.title}`} />
+            </Reveal>
+          )}
 
           {rest.length > 1 && (
             <section className="gallery" aria-label="Gallery">

@@ -8,7 +8,7 @@ export type Inquiry = {
 };
 export type Fields = {
   client: string; title: string; disciplines: Discipline[]; summary: string; scope: string[];
-  location?: string; credits?: string; featured?: boolean;
+  location?: string; credits?: string; video?: string; featured?: boolean;
 };
 
 export class AuthError extends Error {}

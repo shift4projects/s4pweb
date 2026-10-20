@@ -14,7 +14,10 @@ export type Project = {
   summary: string;
   scope: string[];
   location?: string;
+  /** May contain links written as [Name](https://…). */
   credits?: string;
+  /** YouTube or Vimeo link, shown above the gallery. */
+  video?: string;
   /** Full-size photo URLs, first one is the cover. */
   photos: string[];
   /** Shown in "Selected work" on the home page. */
