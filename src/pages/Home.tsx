@@ -43,7 +43,7 @@ export default function Home({ onReel }: { onReel: () => void }) {
         <section className="hero" aria-label="Showreel">
           <HeroVideo src="/video/hero-loop.mp4" mobileSrc="/video/hero-loop-mobile.mp4" poster="/video/hero-poster.jpg" mobilePoster="/video/hero-poster-mobile.jpg" onFrame={onFrame} />
           <div className="hero-top mono">
-            <span>Full-service event technology<br />&amp; production</span>
+            <span>“Yeah, we do that.”</span>
             <div className="clocks">
               {CITIES.map((c) => <span key={c.name}>{c.name}</span>)}
               {CITIES.map((c) => <span key={c.name} className="mute">{timeIn(c.tz, now)}</span>)}
