@@ -8,7 +8,7 @@ import { publicProjects } from "./projects";
 // Link previews (iMessage, WhatsApp, Slack, Facebook, LinkedIn). Those crawlers don't run JavaScript,
 // so every page's title, description and share image are written into the HTML on the server.
 
-const SITE = () => (process.env.SITE_URL || "https://shift4-projects.com").replace(/\/$/, "");
+const SITE = () => (process.env.SITE_URL || "https://shift4projects.com").replace(/\/$/, "");
 const BRAND = "Shift 4 Projects";
 const DEFAULT_DESC = "Full-service event technology and production company based in Los Angeles. Video, audio, lighting, staging, motion design and WiFi for events of any scale.";
 

@@ -169,7 +169,7 @@ function allowedHosts(): Set<string> {
   const hosts = new Set<string>();
   const add = (h?: string) => h && hosts.add(h.toLowerCase());
   try {
-    const site = new URL(process.env.SITE_URL || "https://shift4-projects.com").host;
+    const site = new URL(process.env.SITE_URL || "https://shift4projects.com").host;
     add(site);
     add(site.startsWith("www.") ? site.slice(4) : `www.${site}`);
   } catch { /* ignore a malformed SITE_URL */ }

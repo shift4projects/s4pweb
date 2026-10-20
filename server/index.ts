@@ -17,6 +17,15 @@ const prod = process.env.NODE_ENV === "production";
 
 // One proxy hop on Railway: req.ip is the visitor, and rate limiters can trust it.
 app.set("trust proxy", 1);
+
+// Other domains Shift 4 owns (REDIRECT_HOSTS, comma separated) forward page visits to the main one (SITE_URL),
+// so old links and search results keep working and there's only one copy of the site.
+const redirectHosts = new Set((process.env.REDIRECT_HOSTS || "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean));
+app.use((req, res, next) => {
+  const site = process.env.SITE_URL;
+  if (!site || !redirectHosts.has(req.hostname.toLowerCase()) || (req.method !== "GET" && req.method !== "HEAD")) return next();
+  res.redirect(301, site.replace(/\/$/, "") + req.originalUrl);
+});
 // MCP calls can carry base64 photos, so they get a bigger body limit than the contact form.
 const smallJson = express.json({ limit: "32kb" });
 const bigJson = express.json({ limit: "45mb" });

@@ -4,7 +4,7 @@ import type { Lead } from "./db";
 const esc = (s = "") => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
 const FROM = () => process.env.CONTACT_FROM || "Shift 4 Projects <onboarding@resend.dev>";
-const SITE = () => (process.env.SITE_URL || "https://shift4-projects.com").replace(/\/$/, "");
+const SITE = () => (process.env.SITE_URL || "https://shift4projects.com").replace(/\/$/, "");
 const inbox = () => (process.env.CONTACT_TO || "").split(",").map((s) => s.trim()).filter(Boolean);
 
 const rowsOf = (l: Lead): [string, string | undefined][] => [

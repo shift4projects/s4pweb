@@ -14,7 +14,7 @@ import {
 // The site's own MCP server: lets Shift 4 (or us) update projects by talking to Claude
 // or any MCP client. Content only. Layout, video and animations are not exposed.
 
-const SITE = process.env.SITE_URL || "https://shift4-projects.com";
+const SITE = process.env.SITE_URL || "https://shift4projects.com";
 const discipline = z.enum(DISCIPLINES as [string, ...string[]]);
 
 const json = (v: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(v, null, 2) }] });
