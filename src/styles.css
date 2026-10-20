@@ -163,6 +163,7 @@ a:hover .arrow, button:hover .arrow { transform: translateX(5px); }
   width: 52px; height: 52px; border-radius: 50%; background: var(--accent); color: #000;
   display: grid; place-items: center; font-size: 13px; transition: transform 0.4s var(--ease);
 }
+.reel-btn .dot svg { margin-left: 2px; }
 .reel-btn:hover .dot { transform: scale(1.12); }
 .reel-progress { position: absolute; z-index: 3; left: 0; right: 0; bottom: 0; height: 2px; background: rgba(255, 255, 255, 0.14); }
 .reel-progress span { display: block; height: 100%; background: var(--ink); transform: scaleX(0); transform-origin: left; }

@@ -1,3 +1,4 @@
+import PlayIcon from "../components/PlayIcon";
 import { AnimatePresence } from "motion/react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
@@ -69,7 +70,7 @@ export default function Animation() {
               {REELS.map((r, i) => (
                 <button key={i} className="reel-card" onClick={() => setReel(r.start)} aria-label={`Play reel ${i + 1}`}>
                   <img src={r.poster} alt="" loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.85 }} />
-                  <span className="cap mono"><span>Reel 0{i + 1}</span><span>▶ {r.len}</span></span>
+                  <span className="cap mono"><span>Reel 0{i + 1}</span><span><PlayIcon size={9} /> {r.len}</span></span>
                 </button>
               ))}
             </div>

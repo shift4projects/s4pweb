@@ -1,3 +1,4 @@
+import PlayIcon from "../components/PlayIcon";
 import { motion } from "motion/react";
 import { useCallback, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -62,7 +63,7 @@ export default function Home({ onReel }: { onReel: () => void }) {
               <button className="reel-btn" onClick={onReel}>
                 <span className="mono tc" ref={tcRef} aria-hidden>00:00:00:00</span>
                 <span className="mono">Play full reel</span>
-                <span className="dot" aria-hidden>▶</span>
+                <span className="dot" aria-hidden><PlayIcon size={11} /></span>
               </button>
             </motion.div>
           </div>
