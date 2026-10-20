@@ -45,7 +45,11 @@ const inject = (html: string, pathname = "/") => {
   const projects = publicProjects();
   const dims = dimsFor(projects.flatMap((p) => p.photos));
   const data = JSON.stringify(projects).replace(/</g, "\\u003c");
-  return withMeta(html, pathname).replace("</head>", `<script>window.__PROJECTS__=${data};window.__DIMS__=${JSON.stringify(dims)}</script>${tags}</head>`);
+  // Home: fetch the hero still right away so it's on screen the moment the page renders (it matches the video's first frame).
+  const heroPreload = pathname === "/"
+    ? `<link rel="preload" as="image" href="/video/hero-poster-mobile.jpg" media="(max-width: 760px)"><link rel="preload" as="image" href="/video/hero-poster.jpg" media="(min-width: 761px)">`
+    : "";
+  return withMeta(html, pathname).replace("</head>", `${heroPreload}<script>window.__PROJECTS__=${data};window.__DIMS__=${JSON.stringify(dims)}</script>${tags}</head>`);
 };
 
 // Tiny in-memory rate limit: 5 submissions per IP per 10 minutes.

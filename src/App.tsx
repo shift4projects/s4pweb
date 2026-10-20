@@ -46,7 +46,8 @@ export default function App() {
       <ScrollReset />
       <RouteTracking />
       <Header />
-      <AnimatePresence mode="wait">
+      {/* initial={false}: no fade on the very first load, so the hero video is on screen immediately. Page changes still fade. */}
+      <AnimatePresence mode="wait" initial={false}>
         <motion.main
           id="main"
           key={location.pathname}
