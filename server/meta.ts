@@ -10,7 +10,7 @@ import { publicProjects } from "./projects";
 
 const SITE = () => (process.env.SITE_URL || "https://shift4projects.com").replace(/\/$/, "");
 const BRAND = "Shift 4 Projects";
-const DEFAULT_DESC = "Full-service event technology and production company based in Los Angeles. Video, audio, lighting, staging, motion design and WiFi for events of any scale.";
+const DEFAULT_DESC = "Full-service event technology and production company based in Los Angeles. Video, audio, lighting, animation and motion, event capture and WiFi for events of any scale.";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const clip = (s: string, n = 200) => (s.length > n ? s.slice(0, n - 1).replace(/\s+\S*$/, "") + "…" : s);
