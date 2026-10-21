@@ -67,6 +67,8 @@ export default function Header() {
             exit={{ clipPath: "inset(0 0 100% 0)" }}
             transition={{ duration: 0.6, ease: [0.76, 0, 0.24, 1] }}
           >
+            <motion.p className="mono mute tag" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3, duration: 0.6 }}>“Yeah, we do that.”</motion.p>
+            <div className="links">
             {[{ to: "/", label: "Home" }, ...NAV].map((n, i) => (
               <motion.div key={n.to} initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 + i * 0.05, duration: 0.6, ease: [0.22, 1, 0.36, 1] }}>
                 <NavLink to={n.to} end className={({ isActive }) => `big${isActive ? " on" : ""}`}>
@@ -75,6 +77,7 @@ export default function Header() {
                 </NavLink>
               </motion.div>
             ))}
+            </div>
             <div className="foot mono mute">
               <span>LA · LV · DAL · NYC</span>
               <a href="https://instagram.com/shift4projects" target="_blank" rel="noreferrer">Instagram ↗</a>
