@@ -6,6 +6,7 @@ import { DISCIPLINES } from "../src/data/projects";
 import { db } from "./db";
 import { adminEnabled, safeEqual } from "./auth";
 import { protectedResourceMetadataUrl, verifyOAuthToken } from "./oauth";
+import { registerAgentTools } from "./agent/tools";
 import {
   addPhoto, createProject, getProject, history, listProjects, reorderProjects,
   restoreVersion, setHidden, updateProject, type StoredProject,
@@ -44,7 +45,8 @@ function buildServer() {
       instructions:
         "Manages the project portfolio on the Shift 4 Projects website. Changes go live immediately, and every change is saved " +
         "to history so it can be undone with restore_project_version. Never invent facts (years, venues, credits); only use what " +
-        "the user provides. Prefer hide_project over deleting anything. Design, videos and page layout cannot be changed here.",
+        "the user provides. Prefer hide_project over deleting anything. Design, videos and page layout cannot be changed here. " +
+        "The list_jobs / get_job / open_items / search_inbox tools are the inbox assistant's project memory, built from emails CC'd to office@.",
     },
   );
 
@@ -143,6 +145,7 @@ function buildServer() {
   }, ({ limit }) => run(() =>
     db.prepare("SELECT id, created_at, name, email, company, phone, services, event_date, city, message FROM leads ORDER BY id DESC LIMIT ?").all(limit)));
 
+  registerAgentTools(server);
   return server;
 }
 

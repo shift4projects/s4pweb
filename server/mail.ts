@@ -12,6 +12,10 @@ const rowsOf = (l: Lead): [string, string | undefined][] => [
   ["Services", l.services], ["Event date", l.event_date], ["City", l.city],
 ];
 
+/** Any email from the site's address (used by the inbox assistant's digest). */
+export const sendEmail = (m: { to: string[]; subject: string; html: string; text?: string; reply_to?: string }) =>
+  process.env.RESEND_API_KEY ? resend({ from: FROM(), ...m }) : Promise.resolve(false);
+
 /** POSTs to Resend. RESEND_API_URL can point at a local mock for testing. */
 async function resend(payload: Record<string, unknown>): Promise<boolean> {
   const res = await fetch(process.env.RESEND_API_URL || "https://api.resend.com/emails", {

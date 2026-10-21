@@ -10,6 +10,7 @@ import { publicProjects, uploadsDir } from "./projects";
 import { dimsFor, measureAll } from "./photoDims";
 import { mountOgImages, withMeta } from "./meta";
 import { trackingTags } from "./tracking";
+import { mountAgent } from "./agent/routes";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 5260;
@@ -29,7 +30,8 @@ app.use((req, res, next) => {
 // MCP calls can carry base64 photos, so they get a bigger body limit than the contact form.
 const smallJson = express.json({ limit: "32kb" });
 const bigJson = express.json({ limit: "45mb" });
-app.use((req, res, next) => (req.path.startsWith("/mcp") ? bigJson : smallJson)(req, res, next));
+// The inbox assistant's webhook needs the raw body (signature check), so it parses its own.
+app.use((req, res, next) => (req.path.startsWith("/agent/") ? next() : (req.path.startsWith("/mcp") ? bigJson : smallJson)(req, res, next)));
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 app.get("/api/projects", (_req, res) => res.set("Cache-Control", "no-cache").json(publicProjects()));
@@ -38,6 +40,7 @@ mountOAuth(app);
 mountMcp(app);
 mountOgImages(app);
 mountAdmin(app);
+mountAgent(app);
 
 /** Puts the live project list (and the tracking tags, when configured) into the page so the site never shows stale or hidden work. */
 const tags = trackingTags();
