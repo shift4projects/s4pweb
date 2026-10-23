@@ -7,6 +7,7 @@ import { db } from "./db";
 import { adminEnabled, safeEqual } from "./auth";
 import { protectedResourceMetadataUrl, verifyOAuthToken } from "./oauth";
 import { registerAgentTools } from "./agent/tools";
+import { registerPostTools } from "./postTools";
 import {
   addPhoto, createProject, getProject, history, listProjects, reorderProjects,
   restoreVersion, setHidden, updateProject, type StoredProject,
@@ -146,6 +147,7 @@ function buildServer() {
     db.prepare("SELECT id, created_at, name, email, company, phone, services, event_date, city, message FROM leads ORDER BY id DESC LIMIT ?").all(limit)));
 
   registerAgentTools(server);
+  registerPostTools(server);
   return server;
 }
 

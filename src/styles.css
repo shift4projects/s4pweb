@@ -480,3 +480,38 @@ section.block { padding: 90px var(--gutter); }
 .proj-video img { object-fit: cover; }
 .inline-link { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
 .inline-link:hover { opacity: .7; }
+
+/* Server-rendered copy for crawlers; React replaces it the moment it loads. Kept readable, never hidden. */
+.ssr { padding-top: 120px; padding-bottom: 60px; max-width: 72ch; }
+.ssr h1 { font-size: clamp(32px, 6vw, 56px); margin: 24px 0 16px; }
+.ssr h2 { font-size: 22px; margin: 32px 0 10px; }
+.ssr h3 { font-size: 17px; margin: 18px 0 6px; }
+.ssr p, .ssr li, .ssr dd { line-height: 1.55; color: var(--ink); }
+.ssr ul { padding-left: 20px; } .ssr li { margin: 6px 0; }
+.ssr a { text-decoration: underline; text-underline-offset: 3px; }
+.ssr img { display: block; width: 100%; height: auto; margin: 12px 0; }
+.ssr dl { display: grid; grid-template-columns: 110px 1fr; gap: 6px 12px; } .ssr dt { color: var(--mute); }
+
+/* Insights */
+.post-list { list-style: none; padding: 0; margin: 0; }
+.post-row { display: grid; gap: 18px; padding: 28px 0; border-top: 1px solid var(--line); align-items: start; }
+@media (min-width: 760px) { .post-row { grid-template-columns: 220px 1fr; } }
+.post-row .ph { display: block; aspect-ratio: 16 / 10; overflow: hidden; background: var(--panel-2); }
+.post-row .ph img { width: 100%; height: 100%; object-fit: cover; transition: transform 1s var(--ease); }
+.post-row:hover .ph img { transform: scale(1.03); }
+.post-row .meta { display: grid; gap: 10px; }
+.post-row .display { font-size: clamp(26px, 3.4vw, 40px); line-height: 1.02; }
+.post-row .body { color: var(--mute); max-width: 60ch; line-height: 1.5; }
+.post-cover { width: 100%; max-height: 70vh; object-fit: cover; margin-bottom: 40px; }
+.post-body { max-width: 68ch; font-size: 18px; line-height: 1.65; }
+.post-body h2 { font-family: inherit; font-size: 30px; line-height: 1.1; margin: 48px 0 14px; letter-spacing: -0.01em; }
+.post-body h3 { font-size: 22px; margin: 34px 0 10px; }
+.post-body p, .post-body li { margin: 0 0 18px; } .post-body ul, .post-body ol { padding-left: 22px; }
+.post-body a { text-decoration: underline; text-underline-offset: 3px; }
+.post-body img { width: 100%; height: auto; margin: 28px 0; }
+.post-body blockquote { border-left: 2px solid var(--ink); padding-left: 18px; margin: 28px 0; color: var(--mute); }
+.post-body code { font-family: "JetBrains Mono", monospace; font-size: 0.9em; background: var(--panel-2); padding: 2px 6px; }
+.post-faq { max-width: 68ch; padding-top: 30px; padding-bottom: 50px; }
+.post-faq details { border-top: 1px solid var(--line); padding: 16px 0; }
+.post-faq summary { cursor: pointer; font-weight: 600; font-size: 18px; }
+.post-faq p { margin: 12px 0 0; color: var(--mute); line-height: 1.55; }

@@ -14,6 +14,7 @@ import Animation from "./pages/Animation";
 import Wifi from "./pages/Wifi";
 import Contact from "./pages/Contact";
 import NotFound from "./pages/NotFound";
+import { InsightsIndex, PostPage } from "./pages/Insights";
 
 function ScrollReset() {
   const { pathname } = useLocation();
@@ -63,6 +64,8 @@ export default function App() {
             <Route path="/animation-motion-design" element={<Animation />} />
             <Route path="/wifi-solutions" element={<Wifi />} />
             <Route path="/contact" element={<Contact />} />
+            <Route path="/insights" element={<InsightsIndex />} />
+            <Route path="/insights/:slug" element={<PostPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
           <Footer />

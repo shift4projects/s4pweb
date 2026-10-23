@@ -78,7 +78,7 @@ export default function ProjectPage() {
       <div>
         {cover ? (
           <section className="media-hero proj-cover" aria-label={`${p.client}: ${p.title}`}>
-            <img src={cover} srcSet={srcSet(cover)} sizes="100vw" alt={`${p.client}: ${p.title}`} />
+            <img src={cover} srcSet={srcSet(cover)} sizes="100vw" alt={`${p.client}: ${p.title}${p.location ? `, ${p.location}` : ""}`} fetchPriority="high" />
             <div className="inner">
               <Link to="/projects" className="mono back">← All projects</Link>
               <h1 className="display xl" style={{ marginTop: 28 }}>{p.client}</h1>
@@ -137,7 +137,7 @@ export default function ProjectPage() {
                       <button key={src} onClick={() => setLb(k)} aria-label={`Open image ${k + 1}`}
                         style={{ "--r": ratio, aspectRatio: String(ratio) } as CSSProperties}>
                         <img src={src} srcSet={srcSet(src)} sizes={row.length === 2 ? "(min-width: 760px) 50vw, 100vw" : "100vw"}
-                          alt={`${p.client}: ${p.title}, image ${k + 1}`} loading="lazy" decoding="async" />
+                          alt={`${p.client}: ${p.title}${p.location ? `, ${p.location}` : ""}, photo ${k + 1}`} loading="lazy" decoding="async" />
                       </button>
                     );
                   })}

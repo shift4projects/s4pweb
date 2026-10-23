@@ -11,6 +11,8 @@ import { dimsFor, measureAll } from "./photoDims";
 import { mountOgImages, withMeta } from "./meta";
 import { trackingTags } from "./tracking";
 import { mountAgent } from "./agent/routes";
+import { knownPath, mountSeo, prerender } from "./seo";
+import { publicPosts } from "./posts";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 5260;
@@ -41,6 +43,7 @@ mountMcp(app);
 mountOgImages(app);
 mountAdmin(app);
 mountAgent(app);
+mountSeo(app);
 
 /** Puts the live project list (and the tracking tags, when configured) into the page so the site never shows stale or hidden work. */
 const tags = trackingTags();
@@ -48,11 +51,15 @@ const inject = (html: string, pathname = "/") => {
   const projects = publicProjects();
   const dims = dimsFor(projects.flatMap((p) => p.photos));
   const data = JSON.stringify(projects).replace(/</g, "\\u003c");
+  const posts = pathname.startsWith("/insights") ? `;window.__POSTS__=${JSON.stringify(publicPosts()).replace(/</g, "\\u003c")}` : "";
   // Home: fetch the hero still right away so it's on screen the moment the page renders (it matches the video's first frame).
   const heroPreload = pathname === "/"
     ? `<link rel="preload" as="image" href="/video/hero-poster-mobile.jpg" media="(max-width: 760px)"><link rel="preload" as="image" href="/video/hero-poster.jpg" media="(min-width: 761px)">`
     : "";
-  return withMeta(html, pathname).replace("</head>", `${heroPreload}<script>window.__PROJECTS__=${data};window.__DIMS__=${JSON.stringify(dims)}</script>${tags}</head>`);
+  // Crawlers that don't run JavaScript (link previews, most AI assistants) read the server-rendered copy inside #root; React replaces it on load.
+  return withMeta(html, pathname)
+    .replace("</head>", `${heroPreload}<script>window.__PROJECTS__=${data};window.__DIMS__=${JSON.stringify(dims)}${posts}</script>${tags}</head>`)
+    .replace('<div id="root"></div>', `<div id="root">${prerender(pathname)}</div>`);
 };
 
 // Tiny in-memory rate limit: 5 submissions per IP per 10 minutes.
@@ -121,7 +128,7 @@ async function start() {
       try {
         await measureAll(); // new uploads get measured before the page is built (cached photos cost nothing)
         const html = await vite.transformIndexHtml(req.originalUrl, fs.readFileSync("index.html", "utf8"));
-        res.type("html").set("Cache-Control", "no-cache").send(inject(html, req.path));
+        res.status(knownPath(req.path) ? 200 : 404).type("html").set("Cache-Control", "no-cache").send(inject(html, req.path));
       } catch (e) { next(e); }
     });
   } else {
@@ -135,7 +142,7 @@ async function start() {
     app.use(express.static(dist, { maxAge: 0, index: false }));
     app.get("*", async (req, res) => {
       await measureAll(); // new uploads get measured before the page is built (cached photos cost nothing)
-      res.type("html").set("Cache-Control", "no-cache").send(inject(shell, req.path));
+      res.status(knownPath(req.path) ? 200 : 404).type("html").set("Cache-Control", "no-cache").send(inject(shell, req.path));
     });
   }
   app.listen(PORT, "0.0.0.0", () => console.log(`Shift 4 Projects on http://localhost:${PORT}`));
