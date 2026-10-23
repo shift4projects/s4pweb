@@ -88,22 +88,11 @@ export default function Home({ onReel }: { onReel: () => void }) {
             </div>
           </section>
 
-          <section className="wrap" style={{ paddingBottom: 110 }}>
-            <div className="sec-head">
-              <h2 className="display md">Selected work</h2>
-              <span className="mono mute">{String(PROJECTS.length).padStart(2, "0")} projects</span>
-            </div>
-            {imagesFirst ? <WorkRows items={featured} /> : <WorkIndex items={featured} />}
-            <div style={{ marginTop: 36 }}>
-              <Link to="/projects" className="btn">All projects <span className="arrow">→</span></Link>
-            </div>
-          </section>
-
           <Marquee />
         </div>
       </div>
 
-      {/* 02: services, each card glides over the last */}
+      {/* 02: services, each card glides over the last; Selected work follows on the ink panel (Will, 10/22) */}
       <ServiceStack>
         <div className="glide ink">
           <section className="block">
@@ -120,6 +109,18 @@ export default function Home({ onReel }: { onReel: () => void }) {
               </div>
             </div>
           </section>
+
+          <section className="wrap" style={{ paddingTop: 20, paddingBottom: 110 }}>
+            <div className="sec-head">
+              <h2 className="display md">Selected work</h2>
+              <span className="mono mute">{String(PROJECTS.length).padStart(2, "0")} projects</span>
+            </div>
+            {imagesFirst ? <WorkRows items={featured} /> : <WorkIndex items={featured} />}
+            <div style={{ marginTop: 36 }}>
+              <Link to="/projects" className="btn" style={{ borderColor: "#0a0a0b" }}>All projects <span className="arrow">→</span></Link>
+            </div>
+          </section>
+
         </div>
       </ServiceStack>
     </>

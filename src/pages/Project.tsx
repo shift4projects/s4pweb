@@ -71,9 +71,7 @@ export default function ProjectPage() {
   const next = PROJECTS[(i + 1) % n];
   // The next three projects that have photos, wrapping around the list.
   const more = PROJECTS.slice(i + 1).concat(PROJECTS.slice(0, i)).filter((x) => x.photos.length).slice(0, 3);
-  const [cover, ...rest] = p.photos;
-  // With just one extra photo, it sits beside the description instead of alone in a gallery.
-  const lone = rest.length === 1 ? rest[0] : null;
+  const cover = p.photos[0];
 
   return (
     <>
@@ -102,7 +100,7 @@ export default function ProjectPage() {
         )}
 
         <div className={cover ? "glide" : ""}>
-          <section className={`block proj-info${lone ? " with-photo" : ""}`}>
+          <section className="block proj-info">
             <div className="proj-cols">
               <div>
               <Reveal><p className="statement proj-summary">{p.summary}</p></Reveal>
@@ -116,13 +114,6 @@ export default function ProjectPage() {
                 </div>
               </Reveal>
               </div>
-              {lone && (
-                <Reveal delay={0.15} className="lone-photo">
-                  <button onClick={() => setLb(1)} aria-label="Open image 2" style={{ aspectRatio: String(ratioOf(lone)) }}>
-                    <img src={lone} srcSet={srcSet(lone)} sizes="(min-width: 980px) 45vw, 100vw" alt={`${p.client}: ${p.title}, image 2`} loading="lazy" decoding="async" />
-                  </button>
-                </Reveal>
-              )}
             </div>
           </section>
 
@@ -132,9 +123,10 @@ export default function ProjectPage() {
             </Reveal>
           )}
 
-          {rest.length > 1 && (
+          {/* The cover is in the gallery too (Will, 10/22), so every photo is reachable by scrolling. */}
+          {p.photos.length > 0 && (
             <section className="gallery" aria-label="Gallery">
-              {galleryRows(rest).map((row, r) => (
+              {galleryRows(p.photos).map((row, r) => (
                 <Reveal key={r} y={50} className="g-row"
                   // Cap each row at ~88% of the screen height: width = 88vh × (sum of photo ratios) + gaps.
                   style={{ maxWidth: `calc(88vh * ${row.reduce((t, u) => t + ratioOf(u), 0).toFixed(3)} + ${(row.length - 1) * 18}px)` }}>
