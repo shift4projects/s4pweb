@@ -42,6 +42,11 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS agent_gmail_queue ON agent_gmail_seen(state, internal_date);
 `);
 
+if (!(db.prepare("SELECT value FROM agent_settings WHERE key = 'gmail_order_v2'").get())) {
+  db.exec("UPDATE agent_gmail_seen SET internal_date = NULL WHERE state = 'queued' AND internal_date IS NOT NULL AND internal_date < 1793000000000");
+  db.prepare("INSERT OR REPLACE INTO agent_settings (key, value) VALUES ('gmail_order_v2', '1')").run();
+}
+
 type Mailbox = { email: string; refresh_token: string; history_id: string | null; backfill_after: string | null; backfill_page: string | null; backfill_listed: number; backfill_done: number; connected_at: string; last_sync_at: string | null; error: string | null };
 export const mailboxes = () => db.prepare("SELECT * FROM agent_mailboxes ORDER BY connected_at").all() as Mailbox[];
 
@@ -112,7 +117,12 @@ async function accessToken(m: Mailbox): Promise<string> {
 async function gget<T>(m: Mailbox, path: string, params: Record<string, string> = {}): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     const r = await fetch(`${G}${path}${Object.keys(params).length ? `?${new URLSearchParams(params)}` : ""}`, { headers: { Authorization: `Bearer ${await accessToken(m)}` } });
-    if (r.status === 429 || r.status >= 500) { if (attempt < 4) { await new Promise((s) => setTimeout(s, 2000 * 2 ** attempt)); continue; } }
+    await new Promise((s) => setTimeout(s, 60)); // stay well under Gmail's per-user units/second
+    if (r.status === 429 || r.status >= 500 || r.status === 403) {
+      const text = await r.clone().text();
+      const limited = r.status !== 403 || /rateLimitExceeded|userRateLimitExceeded|Quota exceeded/i.test(text);
+      if (limited && attempt < 6) { await new Promise((s) => setTimeout(s, Math.min(60_000, 3000 * 2 ** attempt))); continue; }
+    }
     if (!r.ok) { const e = new Error(`Gmail ${path} ${r.status}: ${(await r.text()).slice(0, 200)}`) as Error & { status?: number }; e.status = r.status; throw e; }
     return r.json() as Promise<T>;
   }
@@ -217,7 +227,9 @@ async function newMail(m: Mailbox) {
 
 /** Fetches queued messages (oldest first) and hands them to ingest. */
 async function drain(ingest: (m: IncomingMessage) => Promise<boolean>, budget = 60) {
-  const rows = db.prepare(`SELECT s.mailbox, s.gmail_id FROM agent_gmail_seen s WHERE s.state = 'queued' ORDER BY COALESCE(s.internal_date, 0), s.rowid DESC LIMIT ?`).all(budget) as { mailbox: string; gmail_id: string }[];
+  // History (no date, listed newest first) goes first and oldest first, i.e. highest rowid first; then new mail by arrival.
+  const rows = db.prepare(`SELECT s.mailbox, s.gmail_id FROM agent_gmail_seen s WHERE s.state = 'queued'
+    ORDER BY (s.internal_date IS NOT NULL), s.internal_date, s.rowid DESC LIMIT ?`).all(budget) as { mailbox: string; gmail_id: string }[];
   const boxes = new Map(mailboxes().map((b) => [b.email, b]));
   for (const r of rows) {
     const m = boxes.get(r.mailbox); if (!m) continue;
@@ -228,20 +240,6 @@ async function drain(ingest: (m: IncomingMessage) => Promise<boolean>, budget = 
       await ingest(x);
       mark("ingested", null);
     } catch (e) { mark("failed", (e as Error).message.slice(0, 300)); console.warn("[gmail] fetch failed", r.gmail_id, (e as Error).message); }
-  }
-  return rows.length;
-}
-
-/** Backfill listings need internal dates to sort oldest first; fetch them cheaply in small batches. */
-async function dateQueued(budget = 200) {
-  const rows = db.prepare("SELECT mailbox, gmail_id FROM agent_gmail_seen WHERE state = 'queued' AND internal_date IS NULL LIMIT ?").all(budget) as { mailbox: string; gmail_id: string }[];
-  const boxes = new Map(mailboxes().map((b) => [b.email, b]));
-  for (const r of rows) {
-    const m = boxes.get(r.mailbox); if (!m) continue;
-    try {
-      const x = await gget<{ internalDate?: string }>(m, `/messages/${r.gmail_id}`, { format: "minimal" });
-      db.prepare("UPDATE agent_gmail_seen SET internal_date = ? WHERE mailbox = ? AND gmail_id = ?").run(Number(x.internalDate || 0), r.mailbox, r.gmail_id);
-    } catch { db.prepare("UPDATE agent_gmail_seen SET internal_date = 0 WHERE mailbox = ? AND gmail_id = ?").run(r.mailbox, r.gmail_id); }
   }
   return rows.length;
 }
@@ -259,8 +257,6 @@ async function tick() {
         await newMail(m);
       } catch (e) { db.prepare("UPDATE agent_mailboxes SET error = ? WHERE email = ?").run((e as Error).message.slice(0, 300), m.email); console.warn("[gmail]", m.email, (e as Error).message); }
     }
-    // Only start reading once every listing is dated, so the oldest emails really go first.
-    while (await dateQueued() > 0) { /* keep dating */ }
     // Until there's an AI key, just keep the list: emails (and their PDFs) are downloaded when they can be read.
     if (process.env.ANTHROPIC_API_KEY || process.env.AGENT_MODEL === "stub") await drain(ingestFn);
   } finally { running = false; }
