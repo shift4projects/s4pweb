@@ -68,6 +68,12 @@ for (const [col, ddl] of [["attempts", "INTEGER NOT NULL DEFAULT 0"], ["pdfs", "
   if (!(db.prepare("PRAGMA table_info(agent_messages)").all() as { name: string }[]).some((c) => c.name === col)) db.exec(`ALTER TABLE agent_messages ADD COLUMN ${col} ${ddl}`);
 }
 
+// One-time: emails that failed on the old forced-tool call get a fresh set of retries.
+if (!(db.prepare("SELECT value FROM agent_settings WHERE key = 'reset_attempts_v1'").get())) {
+  db.exec("UPDATE agent_messages SET attempts = 0, error = NULL WHERE processed_at IS NULL");
+  db.prepare("INSERT OR REPLACE INTO agent_settings (key, value) VALUES ('reset_attempts_v1', '1')").run();
+}
+
 export type Job = {
   id: number; name: string; client: string | null; event_date: string | null; venue: string | null;
   status: string; summary: string | null; notes: string | null; created_at: string; updated_at: string;

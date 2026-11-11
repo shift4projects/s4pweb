@@ -1,4 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import { z } from "zod";
 import type { Job, Item } from "./store";
 
 // Reads one email and returns what it means for Shift 4's project memory. Claude fills in a fixed
@@ -21,58 +23,31 @@ export type Extraction = {
   resolves: number[];            // ids of existing open items this email answers or completes
 };
 
-const TOOL: Anthropic.Tool = {
-  name: "record_email",
-  description: "Record what this email means for the production company's project memory.",
-  input_schema: {
-    type: "object",
-    required: ["job", "category", "summary", "contacts", "items", "resolves"],
-    properties: {
-      job: {
-        type: ["object", "null"],
-        description: "The job (event / production) this email is about. null only if it is clearly not about any job (newsletter, spam, personal).",
-        properties: {
-          match_id: { type: ["integer", "null"], description: "id of the existing job it belongs to, or null if this is a new job" },
-          name: { type: "string" },
-          client: { type: ["string", "null"] },
-          event_date: { type: ["string", "null"], description: "YYYY-MM-DD, or YYYY-MM if only the month is known" },
-          venue: { type: ["string", "null"] },
-          status: { type: ["string", "null"], enum: ["inquiry", "quoting", "active", "done", "lost", null] },
-          summary: { type: ["string", "null"], description: "Updated one-or-two-sentence state of the whole job, folding in this email" },
-        },
-        required: ["match_id", "name", "client", "event_date", "venue", "status", "summary"],
-      },
-      category: { type: "string", enum: ["inquiry", "change", "approval", "question", "logistics", "vendor", "billing", "other"] },
-      summary: { type: "string", description: "What this email says, in one or two plain sentences" },
-      contacts: {
-        type: "array",
-        items: {
-          type: "object",
-          required: ["email", "name", "company", "role"],
-          properties: {
-            email: { type: "string" }, name: { type: ["string", "null"] }, company: { type: ["string", "null"] },
-            role: { type: "string", enum: ["client", "vendor", "venue", "internal", "other"] },
-          },
-        },
-      },
-      items: {
-        type: "array",
-        description: "New decisions, open questions, tasks, deadlines or scope changes. Only things stated in this email. Skip anything already in the existing open items.",
-        items: {
-          type: "object",
-          required: ["type", "text", "owner", "due"],
-          properties: {
-            type: { type: "string", enum: ["decision", "question", "task", "deadline", "change"] },
-            text: { type: "string", description: "One line, specific, e.g. \"Client needs 2x CDJ-3000, venue has none\"" },
-            owner: { type: ["string", "null"], enum: ["Shift 4", "client", "vendor", null] },
-            due: { type: ["string", "null"], description: "YYYY-MM-DD if a date is stated or clearly implied" },
-          },
-        },
-      },
-      resolves: { type: "array", items: { type: "integer" }, description: "ids of existing open items this email answers, approves or completes" },
-    },
-  },
-};
+// Structured outputs: the model's reply is constrained to this schema (forced tool use isn't available on current models).
+const ExtractionSchema = z.object({
+  job: z.object({
+    match_id: z.number().nullable().describe("id of the existing job it belongs to, or null if this is a new job"),
+    name: z.string().describe("Short job name, e.g. \"Hulu screening and after-party\""),
+    client: z.string().nullable(),
+    event_date: z.string().nullable().describe("YYYY-MM-DD, or YYYY-MM if only the month is known"),
+    venue: z.string().nullable(),
+    status: z.enum(["inquiry", "quoting", "active", "done", "lost"]).nullable(),
+    summary: z.string().nullable().describe("Updated one-or-two-sentence state of the whole job, folding in this email"),
+  }).nullable().describe("The job (event / production) this email is about. null only if it is clearly not about any job"),
+  category: z.enum(["inquiry", "change", "approval", "question", "logistics", "vendor", "billing", "other"]),
+  summary: z.string().describe("What this email says, in one or two plain sentences"),
+  contacts: z.array(z.object({
+    email: z.string(), name: z.string().nullable(), company: z.string().nullable(),
+    role: z.enum(["client", "vendor", "venue", "internal", "other"]),
+  })),
+  items: z.array(z.object({
+    type: z.enum(["decision", "question", "task", "deadline", "change"]),
+    text: z.string().describe("One line, specific, e.g. \"Client needs 2x CDJ-3000, venue has none\""),
+    owner: z.enum(["Shift 4", "client", "vendor"]).nullable(),
+    due: z.string().nullable().describe("YYYY-MM-DD if a date is stated or clearly implied"),
+  })).describe("New decisions, open questions, tasks, deadlines or scope changes stated in this email. Skip anything already in the existing open items."),
+  resolves: z.array(z.number()).describe("ids of existing open items this email answers, approves or completes"),
+});
 
 const SYSTEM = `You are the inbox assistant for Shift 4 Projects, an event technology and production company in Los Angeles (video walls / LED, audio, lighting, staging, playback, DJ gear, power, rigging, scenic, WiFi, crew). You read Shift 4's email (Will's inbox will@shift4projects.com and the shared office@shift4projects.com, whose aliases are projects@ for jobs and accounting@ for billing) and keep an accurate project memory.
 
@@ -121,14 +96,17 @@ export async function extract(i: ExtractInput): Promise<Extraction> {
   if (model === "stub") return stub(i);
   if (!process.env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not set");
   client ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-  const res = await client.messages.create({
-    model, max_tokens: 2500, system: SYSTEM, tools: [TOOL], tool_choice: { type: "tool", name: "record_email" },
+  const res = await client.messages.parse({
+    model, max_tokens: 16000, system: SYSTEM,
+    // Routine extraction: medium effort keeps thinking (and cost) modest.
+    output_config: { effort: (process.env.AGENT_EFFORT as "low" | "medium" | "high" | undefined) || "medium", format: zodOutputFormat(ExtractionSchema) },
     messages: [{ role: "user", content: [
       ...(i.pdfs ?? []).map((d) => ({ type: "document" as const, title: d.name, source: { type: "base64" as const, media_type: "application/pdf" as const, data: d.data } })),
       { type: "text" as const, text: render(i) },
     ] }],
   });
-  const call = res.content.find((c): c is Anthropic.ToolUseBlock => c.type === "tool_use");
-  if (!call) throw new Error("model returned no record_email call");
-  return call.input as Extraction;
+  if (res.stop_reason === "refusal") throw new Error(`model declined (${res.stop_details?.category ?? "no category"})`);
+  if (res.stop_reason === "max_tokens") throw new Error("reply cut off at max_tokens");
+  if (!res.parsed_output) throw new Error("reply didn't match the schema");
+  return res.parsed_output as Extraction;
 }
