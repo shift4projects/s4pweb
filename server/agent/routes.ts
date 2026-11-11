@@ -2,7 +2,8 @@ import express, { type Express, type Request, type Response } from "express";
 import { Webhook } from "svix";
 import { safeEqual } from "../auth";
 import { digestHtml, sendDigest, startSchedule } from "./digest";
-import { agentmailConfigured, fetchFromAgentMail, ingest, processPending } from "./ingest";
+import { agentmailConfigured, aiReady, fetchFromAgentMail, ingest, processPending } from "./ingest";
+import { authUrl, completeConnect, connectKey, connectUrl, gmailStatus, googleConfigured, startGmail, validState } from "./gmail";
 import { stats } from "./store";
 
 // HTTP side of the inbox assistant:
@@ -19,9 +20,35 @@ const adminOnly = (req: Request, res: Response, next: () => void) => {
   next();
 };
 
+const page = (title: string, body: string, ok = true) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${title} | Shift 4 Projects</title>
+<style>body{margin:0;min-height:100svh;display:grid;place-items:center;background:#0a0a0b;color:#f2f0eb;font-family:Helvetica,Arial,sans-serif;padding:24px}main{max-width:460px}h1{font-size:34px;margin:0 0 14px;letter-spacing:-.01em}p{color:#a9a6a0;line-height:1.55}b{color:#f2f0eb}.dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:${ok ? "#4ade80" : "#f87171"};margin-right:10px}</style></head>
+<body><main><h1><span class="dot"></span>${title}</h1>${body}</main></body></html>`;
+const escHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+
 export function mountAgent(app: Express) {
-  const enabled = !!process.env.ANTHROPIC_API_KEY || process.env.AGENT_MODEL === "stub";
-  if (!enabled) { console.warn("[agent] ANTHROPIC_API_KEY not set; inbox assistant idle"); }
+  const enabled = aiReady();
+  if (!enabled) { console.warn("[agent] ANTHROPIC_API_KEY not set; email is stored but not read yet"); }
+
+  // Gmail: the links Will clicks. /connect checks the signed key, then sends him to Google's Allow screen.
+  app.get("/agent/google/connect", (req, res) => {
+    if (!googleConfigured()) return res.status(503).type("html").send(page("Not set up yet", "<p>The Google connection isn't configured on the site yet.</p>", false));
+    if (String(req.query.k || "") !== connectKey()) return res.status(404).type("html").send(page("Link not valid", "<p>Ask Bobby for a fresh link.</p>", false));
+    res.redirect(authUrl(typeof req.query.hint === "string" ? req.query.hint : undefined));
+  });
+  app.get("/agent/google/callback", async (req, res) => {
+    const fail = (msg: string) => res.status(400).type("html").send(page("Didn't connect", `<p>${escHtml(msg)}</p><p>Nothing was changed. Try the link again, or send Bobby a screenshot.</p>`, false));
+    if (req.query.error) return fail(req.query.error === "access_denied" ? "Access wasn't allowed." : String(req.query.error));
+    if (!validState(String(req.query.state || ""))) return fail("This sign-in expired. Open the link again.");
+    try {
+      const email = await completeConnect(String(req.query.code || ""));
+      res.type("html").send(page("Connected", `<p><b>${escHtml(email)}</b> is connected to your Shift 4 assistant. It can read mail but can never send, delete or change anything.</p><p>It's now reading your recent history and will keep up with new mail every few minutes. You can close this tab.</p>`));
+    } catch (e) { fail((e as Error).message); }
+  });
+  app.get("/agent/google/links", adminOnly, (_req, res) => res.json({
+    configured: googleConfigured(), redirect_uri: `${(process.env.SITE_URL || "").replace(/\/$/, "")}/agent/google/callback`,
+    will: connectUrl("will@shift4projects.com"), office: connectUrl("office@shift4projects.com"), any: connectUrl(),
+  }));
+  startGmail(ingest);
 
   // Raw body: Svix signs the exact bytes, so this route must see them before any JSON parsing.
   app.post("/agent/webhook", express.raw({ type: "*/*", limit: "2mb" }), async (req, res) => {
@@ -67,11 +94,11 @@ export function mountAgent(app: Express) {
     } catch (e) { res.status(500).json({ error: (e as Error).message }); }
   });
 
-  app.get("/agent/status", adminOnly, (_req, res) => res.json({ enabled, agentmail: agentmailConfigured(), ...stats() }));
+  app.get("/agent/status", adminOnly, (_req, res) => res.json({ enabled, agentmail: agentmailConfigured(), google: googleConfigured(), inboxes: gmailStatus(), ...stats() }));
   app.post("/agent/retry", adminOnly, async (_req, res) => res.json({ retried: await processPending() }));
   app.get("/agent/digest", adminOnly, (_req, res) => { const d = digestHtml(); d ? res.type("html").send(d.html) : res.type("text").send("Nothing to report."); });
   app.post("/agent/digest", adminOnly, async (_req, res) => res.json({ result: await sendDigest(true) }));
 
-  if (enabled) startSchedule(processPending);
-  console.log(`[agent] inbox assistant ${enabled ? "ready" : "idle"} (${agentmailConfigured() ? "AgentMail connected" : "no AgentMail yet"})`);
+  if (enabled) { startSchedule(processPending); setTimeout(() => processPending().catch((e) => console.error("[agent] backlog", e)), 5000).unref(); }
+  console.log(`[agent] inbox assistant ${enabled ? "ready" : "storing only (no AI key)"}; Gmail ${googleConfigured() ? `on (${gmailStatus().length} inbox${gmailStatus().length === 1 ? "" : "es"})` : "not configured"}`);
 }

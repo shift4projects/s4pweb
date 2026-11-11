@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { sendDigest } from "./digest";
+import { gmailStatus } from "./gmail";
 import {
   addItem, closeItem, contactsForJob, getJob, getMessage, itemsForJob, listJobs, messagesForJob, openItems,
   recentMessages, search, stats, updateJob,
@@ -92,6 +93,12 @@ export function registerAgentTools(server: McpServer) {
     inputSchema: { limit: z.number().int().min(1).max(100).default(20) },
     annotations: { readOnlyHint: true },
   }, ({ limit }) => run(() => recentMessages(limit).map(brief)));
+
+  server.registerTool("inbox_connections", {
+    title: "Connected inboxes",
+    description: "Which Gmail inboxes the assistant reads, how far the history backfill has got, and any connection errors.",
+    inputSchema: {}, annotations: { readOnlyHint: true },
+  }, () => run(() => ({ inboxes: gmailStatus(), ...stats() })));
 
   server.registerTool("send_digest", {
     title: "Send the daily digest now",

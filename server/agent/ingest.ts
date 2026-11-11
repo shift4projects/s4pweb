@@ -45,11 +45,13 @@ const stripHtml = (h: string) => h.replace(/<style[\s\S]*?<\/style>|<script[\s\S
 
 /** Save an email (from AgentMail or handed to us directly) and process it. Returns false if we already had it. */
 export async function ingest(m: IncomingMessage & { attachments_text?: string }): Promise<boolean> {
-  if (hasMessage(m.message_id)) return false;
+  if (hasMessage(m.message_id)) return false; // the same email in will@ and office@ has one Message-ID, so it's read once
   saveMessage(m, directionOf(m.sender));
-  await processOne(m.message_id, m.attachments_text ?? "");
+  // Without an AI key the email is just stored; it gets read once the key is set (processPending drains the backlog).
+  if (aiReady()) await processOne(m.message_id, m.attachments_text ?? "");
   return true;
 }
+export const aiReady = () => !!process.env.ANTHROPIC_API_KEY || process.env.AGENT_MODEL === "stub";
 
 let chain: Promise<unknown> = Promise.resolve();
 /** Runs the extraction for one stored message, one at a time. */
@@ -66,6 +68,7 @@ export function processOne(messageId: string, attachmentsText = ""): Promise<voi
       const x = await extract({
         sender: m.sender, recipients: m.recipients ?? "", subject: m.subject ?? "", sent_at: m.sent_at ?? m.received_at,
         body: m.body ?? "", attachments_text: attachmentsText, direction: m.direction, jobs, open_items: open,
+        pdfs: m.pdfs ? JSON.parse(m.pdfs) : undefined,
         thread_context: earlier.map((e) => `- ${e.sent_at?.slice(0, 10)} ${e.sender}: ${e.summary ?? e.subject}`).join("\n"),
       });
 
@@ -97,8 +100,16 @@ export function processOne(messageId: string, attachmentsText = ""): Promise<voi
 }
 
 /** Retries anything that failed earlier (bad network, API hiccup). Called on a timer. */
+let draining = false;
 export async function processPending(): Promise<number> {
-  const pending = unprocessedMessages();
-  for (const m of pending) await processOne(m.message_id);
-  return pending.length;
+  if (draining || !aiReady()) return 0;
+  draining = true;
+  let total = 0;
+  try {
+    for (let batch = unprocessedMessages(); batch.length; batch = unprocessedMessages()) {
+      for (const m of batch) await processOne(m.message_id);
+      total += batch.length;
+    }
+  } finally { draining = false; }
+  return total;
 }

@@ -63,6 +63,11 @@ try {
   `);
 } catch (e) { console.warn("[agent] FTS unavailable:", (e as Error).message); }
 
+// Added for the Gmail connection: retry counter, and PDF attachments held until the message is processed.
+for (const [col, ddl] of [["attempts", "INTEGER NOT NULL DEFAULT 0"], ["pdfs", "TEXT"], ["mailbox", "TEXT"]] as const) {
+  if (!(db.prepare("PRAGMA table_info(agent_messages)").all() as { name: string }[]).some((c) => c.name === col)) db.exec(`ALTER TABLE agent_messages ADD COLUMN ${col} ${ddl}`);
+}
+
 export type Job = {
   id: number; name: string; client: string | null; event_date: string | null; venue: string | null;
   status: string; summary: string | null; notes: string | null; created_at: string; updated_at: string;
@@ -72,6 +77,7 @@ export type Item = {
   status: string; source_message_id: string | null; created_at: string; closed_at: string | null;
 };
 export type StoredMessage = {
+  attempts?: number; pdfs?: string | null; mailbox?: string | null;
   message_id: string; thread_id: string | null; job_id: number | null; direction: string; category: string | null;
   sender: string; recipients: string | null; subject: string | null; sent_at: string | null; body: string | null;
   attachments: string | null; summary: string | null; processed_at: string | null; error: string | null; received_at: string;
@@ -92,21 +98,25 @@ function index(kind: string, ref: string, text: string) {
 export type IncomingMessage = {
   message_id: string; thread_id?: string; sender: string; recipients: string[]; subject?: string;
   sent_at?: string; body: string; attachments?: { filename?: string; content_type?: string; size?: number }[];
+  /** PDFs to show the model (base64), dropped once the message is processed. */
+  pdfs?: { name: string; data: string }[];
+  mailbox?: string;
 };
 
 export const hasMessage = (id: string) => !!row("SELECT 1 FROM agent_messages WHERE message_id = ?", id);
 
 export function saveMessage(m: IncomingMessage, direction: string) {
   db.prepare(
-    `INSERT OR IGNORE INTO agent_messages (message_id, thread_id, direction, sender, recipients, subject, sent_at, body, attachments)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO agent_messages (message_id, thread_id, direction, sender, recipients, subject, sent_at, body, attachments, pdfs, mailbox)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(m.message_id, m.thread_id ?? null, direction, m.sender, m.recipients.join(", "), m.subject ?? null, m.sent_at ?? null,
-    m.body, JSON.stringify(m.attachments ?? []));
+    m.body, JSON.stringify(m.attachments ?? []), m.pdfs?.length ? JSON.stringify(m.pdfs) : null, m.mailbox ?? null);
   index("message", m.message_id, `${m.subject ?? ""}\n${m.sender}\n${m.body}`);
 }
 
 export const getMessage = (id: string) => row<StoredMessage>("SELECT * FROM agent_messages WHERE message_id = ?", id);
-export const unprocessedMessages = () => rows<StoredMessage>("SELECT * FROM agent_messages WHERE processed_at IS NULL ORDER BY received_at LIMIT 20");
+// Oldest first, so job memory builds in the order things actually happened. Three strikes and a message is left alone.
+export const unprocessedMessages = (limit = 20) => rows<StoredMessage>("SELECT * FROM agent_messages WHERE processed_at IS NULL AND attempts < 3 ORDER BY COALESCE(sent_at, received_at) LIMIT ?", limit);
 export const messagesForJob = (jobId: number, limit = 30) =>
   rows<StoredMessage>("SELECT * FROM agent_messages WHERE job_id = ? ORDER BY COALESCE(sent_at, received_at) DESC LIMIT ?", jobId, limit);
 export const messagesInThread = (threadId: string) =>
@@ -115,11 +125,11 @@ export const recentMessages = (limit = 20) =>
   rows<StoredMessage>("SELECT * FROM agent_messages ORDER BY COALESCE(sent_at, received_at) DESC LIMIT ?", limit);
 
 export function markProcessed(id: string, patch: { job_id: number | null; category: string; summary: string }) {
-  db.prepare("UPDATE agent_messages SET job_id = ?, category = ?, summary = ?, processed_at = datetime('now'), error = NULL WHERE message_id = ?")
+  db.prepare("UPDATE agent_messages SET job_id = ?, category = ?, summary = ?, processed_at = datetime('now'), error = NULL, pdfs = NULL WHERE message_id = ?")
     .run(patch.job_id, patch.category, patch.summary, id);
 }
 export const markFailed = (id: string, error: string) =>
-  db.prepare("UPDATE agent_messages SET error = ? WHERE message_id = ?").run(error.slice(0, 500), id);
+  db.prepare("UPDATE agent_messages SET error = ?, attempts = attempts + 1 WHERE message_id = ?").run(error.slice(0, 500), id);
 
 /* ---------- jobs ---------- */
 
@@ -202,7 +212,7 @@ export const setSetting = (k: string, v: string) =>
 export const stats = () => ({
   jobs: row<{ n: number }>("SELECT count(*) AS n FROM agent_jobs")?.n ?? 0,
   messages: row<{ n: number }>("SELECT count(*) AS n FROM agent_messages")?.n ?? 0,
-  unprocessed: row<{ n: number }>("SELECT count(*) AS n FROM agent_messages WHERE processed_at IS NULL")?.n ?? 0,
+  unprocessed: row<{ n: number }>("SELECT count(*) AS n FROM agent_messages WHERE processed_at IS NULL AND attempts < 3")?.n ?? 0,
   failed: row<{ n: number }>("SELECT count(*) AS n FROM agent_messages WHERE error IS NOT NULL")?.n ?? 0,
   open_items: row<{ n: number }>("SELECT count(*) AS n FROM agent_items WHERE status = 'open'")?.n ?? 0,
   last_digest: getSetting("last_digest"),

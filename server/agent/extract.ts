@@ -14,7 +14,7 @@ export type Extraction = {
     status: "inquiry" | "quoting" | "active" | "done" | "lost" | null;
     summary: string | null;      // one or two sentences, updated state of the job
   } | null;
-  category: "inquiry" | "change" | "approval" | "question" | "logistics" | "vendor" | "other";
+  category: "inquiry" | "change" | "approval" | "question" | "logistics" | "vendor" | "billing" | "other";
   summary: string;               // what this email says, one or two sentences
   contacts: { email: string; name: string | null; company: string | null; role: "client" | "vendor" | "venue" | "internal" | "other" }[];
   items: { type: "decision" | "question" | "task" | "deadline" | "change"; text: string; owner: "Shift 4" | "client" | "vendor" | null; due: string | null }[];
@@ -42,7 +42,7 @@ const TOOL: Anthropic.Tool = {
         },
         required: ["match_id", "name", "client", "event_date", "venue", "status", "summary"],
       },
-      category: { type: "string", enum: ["inquiry", "change", "approval", "question", "logistics", "vendor", "other"] },
+      category: { type: "string", enum: ["inquiry", "change", "approval", "question", "logistics", "vendor", "billing", "other"] },
       summary: { type: "string", description: "What this email says, in one or two plain sentences" },
       contacts: {
         type: "array",
@@ -74,19 +74,22 @@ const TOOL: Anthropic.Tool = {
   },
 };
 
-const SYSTEM = `You are the inbox assistant for Shift 4 Projects, an event technology and production company in Los Angeles (video walls / LED, audio, lighting, staging, playback, DJ gear, power, rigging, scenic, WiFi, crew). You read emails CC'd to office@shift4projects.com and keep an accurate project memory.
+const SYSTEM = `You are the inbox assistant for Shift 4 Projects, an event technology and production company in Los Angeles (video walls / LED, audio, lighting, staging, playback, DJ gear, power, rigging, scenic, WiFi, crew). You read Shift 4's email (Will's inbox will@shift4projects.com and the shared office@shift4projects.com, whose aliases are projects@ for jobs and accounting@ for billing) and keep an accurate project memory.
 
 Rules:
 - Only record facts stated in the email or its attachments. Never invent specs, prices, dates or names.
 - Match to an existing job when the client, event or thread clearly lines up; otherwise create a new one.
 - Items are short, specific and actionable. Skip pleasantries. Do not repeat existing open items; if the email answers one, put its id in "resolves".
 - Internal emails (from the Shift 4 team) still count: they often contain decisions and tasks.
-- If the email is clearly not about any job (newsletter, receipt, spam, personal), set job to null and category "other".
+- Mail sent to accounting@ (or about invoices, deposits, payments, POs, vendor bills) is category "billing". Still tie it to the job when one is identifiable, and record amounts, invoice numbers and due dates exactly as written.
+- If the email is clearly not about any job (newsletter, receipt for a personal purchase, spam, personal life), set job to null and category "other", and record no items or contacts.
+- Attached PDFs (quotes, invoices, riders, floor plans, venue specs) count as part of the email: pull gear, quantities, power, dates and prices from them.
 - Dates: resolve relative dates ("next Friday") using the email's send date. Output YYYY-MM-DD.`;
 
 export type ExtractInput = {
   sender: string; recipients: string; subject: string; sent_at: string; body: string; attachments_text: string;
   direction: string; jobs: Job[]; open_items: Item[]; thread_context: string;
+  pdfs?: { name: string; data: string }[];
 };
 
 function render(i: ExtractInput): string {
@@ -120,7 +123,10 @@ export async function extract(i: ExtractInput): Promise<Extraction> {
   client ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   const res = await client.messages.create({
     model, max_tokens: 2500, system: SYSTEM, tools: [TOOL], tool_choice: { type: "tool", name: "record_email" },
-    messages: [{ role: "user", content: render(i) }],
+    messages: [{ role: "user", content: [
+      ...(i.pdfs ?? []).map((d) => ({ type: "document" as const, title: d.name, source: { type: "base64" as const, media_type: "application/pdf" as const, data: d.data } })),
+      { type: "text" as const, text: render(i) },
+    ] }],
   });
   const call = res.content.find((c): c is Anthropic.ToolUseBlock => c.type === "tool_use");
   if (!call) throw new Error("model returned no record_email call");
