@@ -1,7 +1,7 @@
 import { AgentMailClient } from "agentmail";
 import { extract } from "./extract";
 import {
-  addItem, closeItem, createJob, getJob, getMessage, hasMessage, itemsForJob, listJobs, markFailed, markProcessed,
+  addItem, allJobs, closeItem, createJob, getJob, getMessage, hasMessage, itemsForJob, listJobs, markFailed, markProcessed,
   messagesInThread, saveMessage, touchContact, unprocessedMessages, updateJob, type IncomingMessage,
 } from "./store";
 
@@ -60,11 +60,12 @@ export function processOne(messageId: string, attachmentsText = ""): Promise<voi
     const m = getMessage(messageId);
     if (!m || m.processed_at) return;
     try {
-      const jobs = listJobs();
+      // Match against finished jobs too (old threads keep arriving during the backfill), most recently touched first.
+      const jobs = allJobs().slice(0, 120);
       // Best guess at the job from the thread so Claude sees the right open items.
       const earlier = m.thread_id ? messagesInThread(m.thread_id).filter((x) => x.message_id !== m.message_id) : [];
       const likely = earlier.find((x) => x.job_id)?.job_id ?? null;
-      const open = likely ? itemsForJob(likely, "open") : jobs.flatMap((j) => itemsForJob(j.id, "open")).slice(0, 40);
+      const open = likely ? itemsForJob(likely, "open") : listJobs().flatMap((j) => itemsForJob(j.id, "open")).slice(0, 40);
       const x = await extract({
         sender: m.sender, recipients: m.recipients ?? "", subject: m.subject ?? "", sent_at: m.sent_at ?? m.received_at,
         body: m.body ?? "", attachments_text: attachmentsText, direction: m.direction, jobs, open_items: open,

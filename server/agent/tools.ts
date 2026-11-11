@@ -3,7 +3,7 @@ import { z } from "zod";
 import { sendDigest } from "./digest";
 import { gmailStatus } from "./gmail";
 import {
-  addItem, closeItem, contactsForJob, getJob, getMessage, itemsForJob, listJobs, messagesForJob, openItems,
+  addItem, closeItem, contactsForJob, mergeJobs, getJob, getMessage, itemsForJob, listJobs, messagesForJob, openItems,
   recentMessages, search, stats, updateJob,
 } from "./store";
 
@@ -65,6 +65,12 @@ export function registerAgentTools(server: McpServer) {
       summary: z.string().max(1200).optional(), notes: z.string().max(4000).optional().describe("Free-form notes Will wants kept with the job"),
     },
   }, ({ job_id, ...patch }) => run(() => updateJob(job_id, patch)));
+
+  server.registerTool("merge_jobs", {
+    title: "Merge two jobs",
+    description: "When the same event was filed as two jobs, fold one into the other: its emails and items move to the job you keep.",
+    inputSchema: { keep_job_id: z.number().int(), merge_job_id: z.number().int().describe("This job is removed after its emails and items move over") },
+  }, ({ keep_job_id, merge_job_id }) => run(() => mergeJobs(keep_job_id, merge_job_id)));
 
   server.registerTool("search_inbox", {
     title: "Search email memory",

@@ -163,6 +163,25 @@ export function updateJob(id: number, patch: Partial<Pick<Job, "name" | "client"
   return getJob(id)!;
 }
 
+/** Folds job `from` into job `into`: its emails and items move over, then it's removed. */
+export function mergeJobs(into: number, from: number): Job {
+  if (into === from) throw new Error("Pick two different jobs");
+  const a = getJob(into), b = getJob(from);
+  if (!a || !b) throw new Error("Unknown job id");
+  db.exec("BEGIN");
+  try {
+    db.prepare("UPDATE agent_messages SET job_id = ? WHERE job_id = ?").run(into, from);
+    db.prepare("UPDATE agent_items SET job_id = ? WHERE job_id = ?").run(into, from);
+    db.prepare("DELETE FROM agent_jobs WHERE id = ?").run(from);
+    try { db.prepare("DELETE FROM agent_fts WHERE kind = 'job' AND ref = ?").run(String(from)); } catch { /* no FTS */ }
+    db.exec("COMMIT");
+  } catch (e) { db.exec("ROLLBACK"); throw e; }
+  return updateJob(into, {
+    client: a.client ?? b.client ?? undefined, event_date: a.event_date ?? b.event_date ?? undefined, venue: a.venue ?? b.venue ?? undefined,
+    notes: [a.notes, b.notes, `Merged in "${b.name}" (#${from}).`].filter(Boolean).join("\n"),
+  });
+}
+
 /* ---------- items ---------- */
 
 export const itemsForJob = (jobId: number, status?: string) =>
