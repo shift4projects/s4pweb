@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { sendDigest } from "./digest";
 import { gmailStatus } from "./gmail";
+import { aiPause } from "./ingest";
 import {
   addItem, closeItem, contactsForJob, mergeJobs, getJob, getMessage, itemsForJob, listJobs, messagesForJob, openItems,
   recentMessages, search, stats, updateJob,
@@ -104,7 +105,7 @@ export function registerAgentTools(server: McpServer) {
     title: "Connected inboxes",
     description: "Which Gmail inboxes the assistant reads, how far the history backfill has got, and any connection errors.",
     inputSchema: {}, annotations: { readOnlyHint: true },
-  }, () => run(() => ({ inboxes: gmailStatus(), ...stats() })));
+  }, () => run(() => ({ inboxes: gmailStatus(), paused: aiPause(), ...stats() })));
 
   server.registerTool("send_digest", {
     title: "Send the daily digest now",

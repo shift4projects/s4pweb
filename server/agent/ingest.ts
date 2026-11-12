@@ -1,7 +1,7 @@
 import { AgentMailClient } from "agentmail";
 import { extract } from "./extract";
 import {
-  addItem, allJobs, closeItem, createJob, getJob, getMessage, hasMessage, itemsForJob, listJobs, markFailed, markProcessed,
+  addItem, allJobs, closeItem, createJob, getJob, getMessage, hasMessage, itemsForJob, listJobs, markFailed, markProcessed, noteError,
   messagesInThread, saveMessage, touchContact, unprocessedMessages, updateJob, type IncomingMessage,
 } from "./store";
 
@@ -54,6 +54,12 @@ export async function ingest(m: IncomingMessage & { attachments_text?: string })
 export const aiReady = () => !!process.env.ANTHROPIC_API_KEY || process.env.AGENT_MODEL === "stub";
 
 let chain: Promise<unknown> = Promise.resolve();
+const BLOCKED = /credit balance|invalid x-api-key|authentication_error|permission_error/i;
+const BUSY = /overloaded|rate_limit|\b529\b|ECONNRESET|ETIMEDOUT|fetch failed/i;
+let pausedUntil = 0;
+let pauseReason: string | null = null;
+/** Why the assistant isn't reading right now (no credit, bad key), or null when it's fine. */
+export const aiPause = () => (Date.now() < pausedUntil ? pauseReason : null);
 /** Runs the extraction for one stored message, one at a time. */
 export function processOne(messageId: string, attachmentsText = ""): Promise<void> {
   const run = async () => {
@@ -92,8 +98,17 @@ export function processOne(messageId: string, attachmentsText = ""): Promise<voi
       markProcessed(m.message_id, { job_id: jobId, category: x.category, summary: x.summary });
       console.log(`[agent] ${m.message_id} -> job ${jobId ?? "none"} (${x.category}), ${x.items.length} items`);
     } catch (e) {
+      const msg = (e as Error).message ?? String(e);
+      if (BLOCKED.test(msg) || BUSY.test(msg)) {
+        // Account-level problem (no credit, bad key) or Anthropic busy: not this email's fault, so don't use up its retries.
+        pausedUntil = Date.now() + (BLOCKED.test(msg) ? 10 : 2) * 60_000;
+        pauseReason = BLOCKED.test(msg) ? (/credit balance/i.test(msg) ? "Anthropic credit balance is empty" : "Anthropic key rejected") : "Anthropic busy, retrying shortly";
+        console.error(`[agent] paused: ${pauseReason}`);
+        noteError(messageId, msg);
+        return;
+      }
       console.error("[agent] failed", messageId, e);
-      markFailed(messageId, (e as Error).message);
+      markFailed(messageId, msg);
     }
   };
   chain = chain.then(run, run);
@@ -103,13 +118,12 @@ export function processOne(messageId: string, attachmentsText = ""): Promise<voi
 /** Retries anything that failed earlier (bad network, API hiccup). Called on a timer. */
 let draining = false;
 export async function processPending(): Promise<number> {
-  if (draining || !aiReady()) return 0;
+  if (draining || !aiReady() || Date.now() < pausedUntil) return 0;
   draining = true;
   let total = 0;
   try {
     for (let batch = unprocessedMessages(); batch.length; batch = unprocessedMessages()) {
-      for (const m of batch) await processOne(m.message_id);
-      total += batch.length;
+      for (const m of batch) { if (Date.now() < pausedUntil) return total; await processOne(m.message_id); total++; }
     }
   } finally { draining = false; }
   return total;

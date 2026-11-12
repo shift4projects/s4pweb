@@ -69,6 +69,8 @@ for (const [col, ddl] of [["attempts", "INTEGER NOT NULL DEFAULT 0"], ["pdfs", "
 }
 
 // One-time: emails that failed on the old forced-tool call get a fresh set of retries.
+// Emails that "failed" only because the Anthropic account ran out of credit get their retries back.
+db.exec("UPDATE agent_messages SET attempts = 0 WHERE processed_at IS NULL AND (error LIKE '%credit balance%' OR error LIKE '%overloaded%')");
 if (!(db.prepare("SELECT value FROM agent_settings WHERE key = 'reset_attempts_v1'").get())) {
   db.exec("UPDATE agent_messages SET attempts = 0, error = NULL WHERE processed_at IS NULL");
   db.prepare("INSERT OR REPLACE INTO agent_settings (key, value) VALUES ('reset_attempts_v1', '1')").run();
@@ -134,6 +136,9 @@ export function markProcessed(id: string, patch: { job_id: number | null; catego
   db.prepare("UPDATE agent_messages SET job_id = ?, category = ?, summary = ?, processed_at = datetime('now'), error = NULL, pdfs = NULL WHERE message_id = ?")
     .run(patch.job_id, patch.category, patch.summary, id);
 }
+/** Records an error without using up one of the email's retries (account-level problems). */
+export const noteError = (id: string, error: string) =>
+  db.prepare("UPDATE agent_messages SET error = ? WHERE message_id = ?").run(error.slice(0, 500), id);
 export const markFailed = (id: string, error: string) =>
   db.prepare("UPDATE agent_messages SET error = ?, attempts = attempts + 1 WHERE message_id = ?").run(error.slice(0, 500), id);
 

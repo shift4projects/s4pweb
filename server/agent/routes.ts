@@ -2,7 +2,7 @@ import express, { type Express, type Request, type Response } from "express";
 import { Webhook } from "svix";
 import { safeEqual } from "../auth";
 import { digestHtml, sendDigest, startSchedule } from "./digest";
-import { agentmailConfigured, aiReady, fetchFromAgentMail, ingest, processPending } from "./ingest";
+import { agentmailConfigured, aiPause, aiReady, fetchFromAgentMail, ingest, processPending } from "./ingest";
 import { authUrl, completeConnect, connectKey, connectUrl, gmailStatus, googleConfigured, startGmail, validState } from "./gmail";
 import { stats } from "./store";
 
@@ -94,7 +94,7 @@ export function mountAgent(app: Express) {
     } catch (e) { res.status(500).json({ error: (e as Error).message }); }
   });
 
-  app.get("/agent/status", adminOnly, (_req, res) => res.json({ enabled, agentmail: agentmailConfigured(), google: googleConfigured(), inboxes: gmailStatus(), ...stats() }));
+  app.get("/agent/status", adminOnly, (_req, res) => res.json({ enabled, agentmail: agentmailConfigured(), google: googleConfigured(), inboxes: gmailStatus(), paused: aiPause(), ...stats() }));
   app.post("/agent/retry", adminOnly, async (_req, res) => res.json({ retried: await processPending() }));
   app.get("/agent/digest", adminOnly, (_req, res) => { const d = digestHtml(); d ? res.type("html").send(d.html) : res.type("text").send("Nothing to report."); });
   app.post("/agent/digest", adminOnly, async (_req, res) => res.json({ result: await sendDigest(true) }));
