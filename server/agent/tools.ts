@@ -4,7 +4,7 @@ import { sendDigest } from "./digest";
 import { gmailStatus } from "./gmail";
 import { aiPause } from "./ingest";
 import {
-  addItem, closeItem, contactsForJob, mergeJobs, getJob, getMessage, itemsForJob, listJobs, messagesForJob, openItems,
+  addItem, closeItem, contactsForJob, currentItemsForJob, mergeJobs, getJob, getMessage, itemsForJob, listJobs, messagesForJob, openItems,
   recentMessages, search, stats, updateJob,
 } from "./store";
 
@@ -19,10 +19,10 @@ const brief = (m: { message_id: string; sent_at: string | null; received_at: str
 export function registerAgentTools(server: McpServer) {
   server.registerTool("list_jobs", {
     title: "List jobs (inbox assistant)",
-    description: "Jobs the inbox assistant is tracking from office@ email, soonest event first. Default: everything not done or lost.",
-    inputSchema: { status: z.enum(["inquiry", "quoting", "active", "done", "lost"]).optional() },
+    description: "Jobs the inbox assistant is tracking from will@ and office@ email, soonest event first. Default: current jobs only (event upcoming or in the last 2 weeks, or email in the last 30 days). Pass include_old for every job not marked done or lost, or a status for that status.",
+    inputSchema: { status: z.enum(["inquiry", "quoting", "active", "done", "lost"]).optional(), include_old: z.boolean().optional() },
     annotations: { readOnlyHint: true },
-  }, ({ status }) => run(() => listJobs(status).map((j) => ({ ...j, open_items: itemsForJob(j.id, "open").length }))));
+  }, ({ status, include_old }) => run(() => listJobs(status, include_old).map((j) => ({ ...j, open_items: (include_old || status ? itemsForJob(j.id, "open") : currentItemsForJob(j.id)).length }))));
 
   server.registerTool("get_job", {
     title: "Get job",
@@ -37,10 +37,10 @@ export function registerAgentTools(server: McpServer) {
 
   server.registerTool("open_items", {
     title: "Open items across all jobs",
-    description: "Every open question, task, deadline and change, soonest due first. Optionally only those due on or before a date.",
-    inputSchema: { due_before: z.string().optional().describe("YYYY-MM-DD") },
+    description: "Open questions, tasks, deadlines and changes across current jobs, soonest due first. Leaves out items on jobs that are over and items more than 45 days stale unless include_old is true. Optionally only those due on or before a date.",
+    inputSchema: { due_before: z.string().optional().describe("YYYY-MM-DD"), include_old: z.boolean().optional() },
     annotations: { readOnlyHint: true },
-  }, ({ due_before }) => run(() => openItems(due_before)));
+  }, ({ due_before, include_old }) => run(() => openItems(due_before, include_old)));
 
   server.registerTool("complete_item", {
     title: "Mark item done",

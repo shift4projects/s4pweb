@@ -1,7 +1,7 @@
 import { AgentMailClient } from "agentmail";
 import { extract } from "./extract";
 import {
-  addItem, allJobs, closeItem, createJob, getJob, getMessage, hasMessage, itemsForJob, listJobs, markFailed, markProcessed, noteError,
+  addItem, allJobs, closeItem, createJob, currentItemsForJob, getJob, getMessage, hasMessage, itemsForJob, listJobs, markFailed, markProcessed, noteError,
   messagesInThread, saveMessage, touchContact, unprocessedMessages, updateJob, type IncomingMessage,
 } from "./store";
 
@@ -71,7 +71,7 @@ export function processOne(messageId: string, attachmentsText = ""): Promise<voi
       // Best guess at the job from the thread so Claude sees the right open items.
       const earlier = m.thread_id ? messagesInThread(m.thread_id).filter((x) => x.message_id !== m.message_id) : [];
       const likely = earlier.find((x) => x.job_id)?.job_id ?? null;
-      const open = likely ? itemsForJob(likely, "open") : listJobs().flatMap((j) => itemsForJob(j.id, "open")).slice(0, 40);
+      const open = likely ? itemsForJob(likely, "open") : listJobs().flatMap((j) => currentItemsForJob(j.id)).slice(0, 40);
       const x = await extract({
         sender: m.sender, recipients: m.recipients ?? "", subject: m.subject ?? "", sent_at: m.sent_at ?? m.received_at,
         body: m.body ?? "", attachments_text: attachmentsText, direction: m.direction, jobs, open_items: open,

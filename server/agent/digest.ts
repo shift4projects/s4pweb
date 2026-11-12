@@ -1,5 +1,5 @@
 import { sendEmail } from "../mail";
-import { getSetting, listJobs, itemsForJob, recentMessages, setSetting, type Item } from "./store";
+import { currentItemsForJob, getSetting, listJobs, recentMessages, setSetting, type Item } from "./store";
 
 // The daily digest: what's open on every active job, and what came in since yesterday.
 
@@ -10,7 +10,7 @@ const hourIn = (tz: string) => Number(new Intl.DateTimeFormat("en-US", { timeZon
 
 export function digestHtml(): { html: string; text: string; subject: string } | null {
   const today = todayIn(TZ());
-  const jobs = listJobs().map((j) => ({ ...j, items: itemsForJob(j.id, "open") })).filter((j) => j.items.length || j.status === "inquiry" || j.status === "quoting");
+  const jobs = listJobs().map((j) => ({ ...j, items: currentItemsForJob(j.id) })).filter((j) => j.items.length || j.status === "inquiry" || j.status === "quoting");
   const since = new Date(Date.now() - 36 * 3600 * 1000).toISOString();
   const fresh = recentMessages(40).filter((m) => (m.sent_at ?? m.received_at) >= since && m.processed_at);
   if (!jobs.length && !fresh.length) return null;

@@ -144,9 +144,21 @@ export const markFailed = (id: string, error: string) =>
 
 /* ---------- jobs ---------- */
 
-export const listJobs = (status?: string) =>
+// "Current" = still in play: the event is upcoming or within the last 2 weeks, or there was email on it in the last 30 days.
+// The year-long backfill left plenty of jobs marked active/quoting that are long over; they stay searchable but out of the way.
+const LAST_EMAIL = "(SELECT max(COALESCE(sent_at, received_at)) FROM agent_messages WHERE job_id = j.id)";
+const CURRENT_JOB = `j.status NOT IN ('done', 'lost') AND (j.event_date >= date('now', '-14 days') OR ${LAST_EMAIL} >= date('now', '-30 days'))`;
+// An item is fresh when its due date, or failing that the email it came from, is within the last 45 days.
+const FRESH_ITEM = "COALESCE(i.due, (SELECT COALESCE(sent_at, received_at) FROM agent_messages WHERE message_id = i.source_message_id), i.created_at) >= date('now', '-45 days')";
+
+/** Jobs by status, or by default only current ones (pass includeOld for every open job ever seen). */
+export const listJobs = (status?: string, includeOld = false) =>
   status ? rows<Job>("SELECT * FROM agent_jobs WHERE status = ? ORDER BY COALESCE(event_date, '9999') , updated_at DESC", status)
-    : rows<Job>("SELECT * FROM agent_jobs WHERE status NOT IN ('done', 'lost') ORDER BY COALESCE(event_date, '9999'), updated_at DESC");
+    : includeOld ? rows<Job>("SELECT * FROM agent_jobs WHERE status NOT IN ('done', 'lost') ORDER BY COALESCE(event_date, '9999'), updated_at DESC")
+    : rows<Job>(`SELECT j.* FROM agent_jobs j WHERE ${CURRENT_JOB} ORDER BY COALESCE(j.event_date, '9999'), j.updated_at DESC`);
+/** Open items on one job that are still live (not weeks past due, not from long-ago email). */
+export const currentItemsForJob = (jobId: number) =>
+  rows<Item>(`SELECT i.* FROM agent_items i WHERE i.job_id = ? AND i.status = 'open' AND ${FRESH_ITEM} ORDER BY COALESCE(i.due, '9999'), i.id`, jobId);
 export const allJobs = () => rows<Job>("SELECT * FROM agent_jobs ORDER BY updated_at DESC");
 export const getJob = (id: number) => row<Job>("SELECT * FROM agent_jobs WHERE id = ?", id);
 
@@ -192,9 +204,12 @@ export function mergeJobs(into: number, from: number): Job {
 export const itemsForJob = (jobId: number, status?: string) =>
   status ? rows<Item>("SELECT * FROM agent_items WHERE job_id = ? AND status = ? ORDER BY COALESCE(due, '9999'), id", jobId, status)
     : rows<Item>("SELECT * FROM agent_items WHERE job_id = ? ORDER BY status DESC, COALESCE(due, '9999'), id", jobId);
-export const openItems = (dueBefore?: string) =>
-  dueBefore ? rows<Item & { job_name: string }>("SELECT i.*, j.name AS job_name FROM agent_items i JOIN agent_jobs j ON j.id = i.job_id WHERE i.status = 'open' AND i.due IS NOT NULL AND i.due <= ? ORDER BY i.due", dueBefore)
-    : rows<Item & { job_name: string }>("SELECT i.*, j.name AS job_name FROM agent_items i JOIN agent_jobs j ON j.id = i.job_id WHERE i.status = 'open' ORDER BY COALESCE(i.due, '9999'), i.job_id, i.id");
+/** Open items, by default only fresh ones on current jobs. */
+export function openItems(dueBefore?: string, includeOld = false) {
+  const where = ["i.status = 'open'", ...(includeOld ? [] : [CURRENT_JOB, FRESH_ITEM]), ...(dueBefore ? ["i.due IS NOT NULL AND i.due <= ?"] : [])].join(" AND ");
+  const sql = `SELECT i.*, j.name AS job_name FROM agent_items i JOIN agent_jobs j ON j.id = i.job_id WHERE ${where} ORDER BY COALESCE(i.due, '9999'), i.job_id, i.id`;
+  return dueBefore ? rows<Item & { job_name: string }>(sql, dueBefore) : rows<Item & { job_name: string }>(sql);
+}
 
 export function addItem(i: { job_id: number; type: string; text: string; owner?: string | null; due?: string | null; source_message_id?: string | null }): Item {
   const r = db.prepare("INSERT INTO agent_items (job_id, type, text, owner, due, source_message_id) VALUES (?, ?, ?, ?, ?, ?)")
@@ -244,6 +259,8 @@ export const stats = () => ({
   messages: row<{ n: number }>("SELECT count(*) AS n FROM agent_messages")?.n ?? 0,
   unprocessed: row<{ n: number }>("SELECT count(*) AS n FROM agent_messages WHERE processed_at IS NULL AND attempts < 3")?.n ?? 0,
   failed: row<{ n: number }>("SELECT count(*) AS n FROM agent_messages WHERE error IS NOT NULL")?.n ?? 0,
+  current_jobs: row<{ n: number }>(`SELECT count(*) AS n FROM agent_jobs j WHERE ${CURRENT_JOB}`)?.n ?? 0,
+  current_open_items: row<{ n: number }>(`SELECT count(*) AS n FROM agent_items i JOIN agent_jobs j ON j.id = i.job_id WHERE i.status = 'open' AND ${CURRENT_JOB} AND ${FRESH_ITEM}`)?.n ?? 0,
   open_items: row<{ n: number }>("SELECT count(*) AS n FROM agent_items WHERE status = 'open'")?.n ?? 0,
   last_digest: getSetting("last_digest"),
 });
