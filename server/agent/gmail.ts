@@ -176,6 +176,24 @@ async function toIncoming(m: Mailbox, id: string): Promise<IncomingMessage | { s
   };
 }
 
+/** Downloads an email's PDF attachments again by its Message-ID (they aren't kept after the first read). */
+export async function pdfsFor(rfcMessageId: string, mailbox?: string | null): Promise<{ name: string; data: string }[]> {
+  const boxes = mailboxes().filter((b) => !mailbox || b.email === mailbox);
+  for (const m of boxes.length ? boxes : mailboxes()) {
+    const hit = await gget<{ messages?: { id: string }[] }>(m, "/messages", { q: `rfc822msgid:${rfcMessageId.replace(/^<|>$/g, "")}`, maxResults: "1" });
+    const id = hit.messages?.[0]?.id;
+    if (!id) continue;
+    const msg = await gget<GMessage>(m, `/messages/${id}`, { format: "full" });
+    const out: { name: string; data: string }[] = [];
+    for (const p of walk(msg.payload).filter((f) => f.filename && f.body?.attachmentId && (f.mimeType === "application/pdf" || /\.pdf$/i.test(f.filename)) && (f.body?.size ?? 0) < 6_000_000).slice(0, 4)) {
+      const a = await gget<{ data: string }>(m, `/messages/${id}/attachments/${p.body!.attachmentId}`);
+      out.push({ name: p.filename!, data: Buffer.from(a.data, "base64url").toString("base64") });
+    }
+    return out;
+  }
+  return [];
+}
+
 /* ---------- sync loop ---------- */
 
 const queue = (mailbox: string, ids: { id: string; at?: number }[]) => {

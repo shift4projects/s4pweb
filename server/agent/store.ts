@@ -71,6 +71,33 @@ for (const [col, ddl] of [["attempts", "INTEGER NOT NULL DEFAULT 0"], ["pdfs", "
 // One-time: emails that failed on the old forced-tool call get a fresh set of retries.
 // Emails that "failed" only because the Anthropic account ran out of credit get their retries back.
 db.exec("UPDATE agent_messages SET attempts = 0 WHERE processed_at IS NULL AND (error LIKE '%credit balance%' OR error LIKE '%overloaded%')");
+// Price memory: every line item from the estimates, quotes and invoices that pass through email.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS agent_prices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id INTEGER,
+    source_message_id TEXT NOT NULL,
+    doc TEXT NOT NULL,                 -- attachment filename
+    doc_type TEXT,                     -- estimate | quote | invoice
+    doc_number TEXT,
+    doc_date TEXT,
+    issuer TEXT,                       -- who wrote the document
+    bill_to TEXT,
+    side TEXT NOT NULL,                -- sell = Shift 4 charging a client; cost = a vendor or crew charging Shift 4
+    category TEXT,                     -- video | audio | lighting | staging | power | rigging | labor | transport | creative | other
+    description TEXT NOT NULL,
+    qty REAL,
+    unit TEXT,
+    unit_price TEXT,                   -- as written
+    amount TEXT,                       -- as written
+    amount_num REAL,
+    doc_total TEXT
+  );
+  CREATE INDEX IF NOT EXISTS agent_prices_job ON agent_prices(job_id);
+  CREATE INDEX IF NOT EXISTS agent_prices_src ON agent_prices(source_message_id);
+`);
+try { db.exec("ALTER TABLE agent_messages ADD COLUMN prices_state TEXT"); } catch { /* already there */ } // null = not looked at; done | none | failed
+
 // Added for the tidy pass and the morning brief.
 for (const [table, col, ddl] of [
   ["agent_jobs", "billing", "TEXT"],        // JSON: invoices seen in email for this job
@@ -208,6 +235,7 @@ export function mergeJobs(into: number, from: number): Job {
   try {
     db.prepare("UPDATE agent_messages SET job_id = ? WHERE job_id = ?").run(into, from);
     db.prepare("UPDATE agent_items SET job_id = ? WHERE job_id = ?").run(into, from);
+    db.prepare("UPDATE agent_prices SET job_id = ? WHERE job_id = ?").run(into, from);
     db.prepare("DELETE FROM agent_jobs WHERE id = ?").run(from);
     db.prepare("UPDATE agent_jobs SET tidied_at = NULL WHERE id = ?").run(into); // re-read the combined job on the next tidy
     try { db.prepare("DELETE FROM agent_fts WHERE kind = 'job' AND ref = ?").run(String(from)); } catch { /* no FTS */ }
@@ -233,6 +261,49 @@ export function openInvoices(direction?: "receivable" | "payable") {
     .flatMap((j) => invoicesOf(j).filter((v) => v.status !== "paid" && (!direction || v.direction === direction))
       .map((v) => ({ job_id: j.id, job: j.name, event_date: j.event_date, ...v })));
 }
+
+/* ---------- price memory ---------- */
+
+export type PriceLine = {
+  id: number; job_id: number | null; source_message_id: string; doc: string; doc_type: string | null; doc_number: string | null; doc_date: string | null;
+  issuer: string | null; bill_to: string | null; side: string; category: string | null; description: string; qty: number | null; unit: string | null;
+  unit_price: string | null; amount: string | null; amount_num: number | null; doc_total: string | null;
+};
+/** Emails carrying a PDF that looks like an estimate, quote, invoice or proposal and hasn't been read for prices yet. */
+export const priceCandidates = (limit = 20) =>
+  rows<StoredMessage>(`SELECT * FROM agent_messages WHERE prices_state IS NULL AND processed_at IS NOT NULL
+    AND attachments LIKE '%pdf%' AND (lower(attachments) LIKE '%estimate%' OR lower(attachments) LIKE '%quote%' OR lower(attachments) LIKE '%invoice%' OR lower(attachments) LIKE '%proposal%')
+    AND lower(sender) NOT LIKE '%stripe.com%' AND lower(sender) NOT LIKE '%zoom.us%' AND lower(sender) NOT LIKE '%intuit.com%'
+    ORDER BY COALESCE(sent_at, received_at) DESC LIMIT ?`, limit);
+export const priceCandidateCount = () => row<{ n: number }>(`SELECT count(*) AS n FROM agent_messages WHERE prices_state IS NULL AND processed_at IS NOT NULL
+    AND attachments LIKE '%pdf%' AND (lower(attachments) LIKE '%estimate%' OR lower(attachments) LIKE '%quote%' OR lower(attachments) LIKE '%invoice%' OR lower(attachments) LIKE '%proposal%')
+    AND lower(sender) NOT LIKE '%stripe.com%' AND lower(sender) NOT LIKE '%zoom.us%' AND lower(sender) NOT LIKE '%intuit.com%'`)?.n ?? 0;
+export const setPricesState = (messageId: string, state: "done" | "none" | "failed") =>
+  db.prepare("UPDATE agent_messages SET prices_state = ? WHERE message_id = ?").run(state, messageId);
+const num = (s: string | null | undefined) => { const d = String(s ?? "").replace(/[^0-9.\-]/g, ""); const n = Number(d); return /\d/.test(d) && isFinite(n) ? n : null; };
+export function savePrices(messageId: string, jobId: number | null, doc: { doc: string; doc_type: string | null; doc_number: string | null; doc_date: string | null; issuer: string | null; bill_to: string | null; side: string; total: string | null },
+  lines: { category: string | null; description: string; qty: number | null; unit: string | null; unit_price: string | null; amount: string | null }[]) {
+  db.prepare("DELETE FROM agent_prices WHERE source_message_id = ? AND doc = ?").run(messageId, doc.doc);
+  const ins = db.prepare(`INSERT INTO agent_prices (job_id, source_message_id, doc, doc_type, doc_number, doc_date, issuer, bill_to, side, category, description, qty, unit, unit_price, amount, amount_num, doc_total)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  for (const l of lines) ins.run(jobId, messageId, doc.doc, doc.doc_type, doc.doc_number, doc.doc_date, doc.issuer, doc.bill_to, doc.side, l.category, l.description, l.qty, l.unit, l.unit_price, l.amount, num(l.amount), doc.total);
+}
+const PRICE_COLS = "p.*, j.name AS job_name, j.event_date AS job_date";
+/** Past line items matching every word of the query, newest document first. */
+export function searchPrices(q: string, side?: string, limit = 40) {
+  const words = q.toLowerCase().split(/\s+/).filter((w) => w.length > 1).slice(0, 6);
+  const where = [...words.map(() => "lower(p.description || ' ' || COALESCE(p.category, '')) LIKE ?"), ...(side ? ["p.side = ?"] : [])].join(" AND ") || "1";
+  return rows<PriceLine & { job_name: string | null; job_date: string | null }>(
+    `SELECT ${PRICE_COLS} FROM agent_prices p LEFT JOIN agent_jobs j ON j.id = p.job_id WHERE ${where} ORDER BY COALESCE(p.doc_date, '') DESC, p.id LIMIT ?`,
+    ...words.map((w) => `%${w}%`), ...(side ? [side] : []), limit);
+}
+export const pricesForJob = (jobId: number) =>
+  rows<PriceLine>("SELECT p.* FROM agent_prices p WHERE p.job_id = ? ORDER BY COALESCE(p.doc_date, ''), p.doc, p.id", jobId);
+export const priceStats = () => ({
+  lines: row<{ n: number }>("SELECT count(*) AS n FROM agent_prices")?.n ?? 0,
+  documents: row<{ n: number }>("SELECT count(*) AS n FROM (SELECT DISTINCT source_message_id, doc FROM agent_prices)")?.n ?? 0,
+  waiting: priceCandidateCount(),
+});
 
 /* ---------- the morning brief ---------- */
 

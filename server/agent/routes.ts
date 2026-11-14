@@ -5,7 +5,8 @@ import { digestHtml, sendDigest, startSchedule } from "./digest";
 import { agentmailConfigured, aiPause, aiReady, fetchFromAgentMail, ingest, processPending } from "./ingest";
 import { authUrl, completeConnect, connectKey, connectUrl, gmailStatus, googleConfigured, startGmail, validState } from "./gmail";
 import { brief } from "./brief";
-import { jobsNeedingTidy, stats, usageByDay } from "./store";
+import { pricesPending, pricesRunning } from "./prices";
+import { jobsNeedingTidy, priceStats, stats, usageByDay } from "./store";
 import { findDuplicates, tidyJob, tidyPending, tidyRunning } from "./tidy";
 
 // HTTP side of the inbox assistant:
@@ -96,7 +97,7 @@ export function mountAgent(app: Express) {
     } catch (e) { res.status(500).json({ error: (e as Error).message }); }
   });
 
-  app.get("/agent/status", adminOnly, (_req, res) => res.json({ enabled, agentmail: agentmailConfigured(), google: googleConfigured(), inboxes: gmailStatus(), paused: aiPause(), tidy: { running: tidyRunning(), jobs_waiting: jobsNeedingTidy().length }, ...stats() }));
+  app.get("/agent/status", adminOnly, (_req, res) => res.json({ enabled, agentmail: agentmailConfigured(), google: googleConfigured(), inboxes: gmailStatus(), paused: aiPause(), tidy: { running: tidyRunning(), jobs_waiting: jobsNeedingTidy().length }, prices: { running: pricesRunning(), ...priceStats() }, ...stats() }));
   app.get("/agent/brief", adminOnly, (_req, res) => res.json(brief()));
   app.get("/agent/usage", adminOnly, (_req, res) => res.json(usageByDay(30)));
   // Tidy one job (?job=12, waits for it) or everything with new email (returns at once, runs in the background).
@@ -108,11 +109,17 @@ export function mountAgent(app: Express) {
       res.json({ started: true, jobs_to_tidy: waiting });
     } catch (e) { res.status(500).json({ error: (e as Error).message }); }
   });
+  app.post("/agent/prices", adminOnly, (_req, res) => {
+    if (!pricesRunning()) pricesPending().catch((e) => console.error("[agent] prices", e));
+    res.json({ started: true, ...priceStats() });
+  });
   app.get("/agent/duplicates", adminOnly, async (_req, res) => { try { res.json(await findDuplicates()); } catch (e) { res.status(500).json({ error: (e as Error).message }); } });
   app.post("/agent/retry", adminOnly, async (_req, res) => res.json({ retried: await processPending() }));
   app.get("/agent/digest", adminOnly, (_req, res) => { const d = digestHtml(); d ? res.type("html").send(d.html) : res.type("text").send("Nothing to report."); });
   app.post("/agent/digest", adminOnly, async (_req, res) => res.json({ result: await sendDigest(true) }));
 
-  if (enabled) { startSchedule(processPending, () => (aiPause() ? Promise.resolve() : tidyPending())); setTimeout(() => processPending().catch((e) => console.error("[agent] backlog", e)), 5000).unref(); }
+  // Every 10 minutes: retry unread email, then read any new estimate/invoice PDFs for prices.
+  const upkeep = async () => { const n = await processPending(); if (!aiPause() && googleConfigured()) await pricesPending(40); return n; };
+  if (enabled) { startSchedule(upkeep, () => (aiPause() ? Promise.resolve() : tidyPending())); setTimeout(() => processPending().catch((e) => console.error("[agent] backlog", e)), 5000).unref(); }
   console.log(`[agent] inbox assistant ${enabled ? "ready" : "storing only (no AI key)"}; Gmail ${googleConfigured() ? `on (${gmailStatus().length} inbox${gmailStatus().length === 1 ? "" : "es"})` : "not configured"}`);
 }

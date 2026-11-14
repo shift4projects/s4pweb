@@ -4,10 +4,11 @@ import { brief } from "./brief";
 import { sendDigest } from "./digest";
 import { gmailStatus } from "./gmail";
 import { aiPause } from "./ingest";
+import { pricesPending, pricesRunning } from "./prices";
 import { findDuplicates, tidyJob, tidyPending, tidyRunning } from "./tidy";
 import {
   addItem, closeItem, contactsForJob, currentItemsForJob, mergeJobs, getJob, getMessage, itemsForJob, listJobs, messagesForJob, openItems,
-  findContacts, invoicesOf, jobsNeedingTidy, openInvoices, recentMessages, search, stats, updateJob, usageByDay,
+  findContacts, invoicesOf, jobsNeedingTidy, openInvoices, pricesForJob, priceStats, recentMessages, search, searchPrices, stats, updateJob, usageByDay,
 } from "./store";
 
 // The project-memory tools Will uses from Claude: "what's open on the Hulu job?", "what did the venue say about power?"
@@ -108,7 +109,7 @@ export function registerAgentTools(server: McpServer) {
     title: "Connected inboxes",
     description: "Which Gmail inboxes the assistant reads, how far the history backfill has got, and any connection errors.",
     inputSchema: {}, annotations: { readOnlyHint: true },
-  }, () => run(() => ({ inboxes: gmailStatus(), paused: aiPause(), tidy: { running: tidyRunning(), jobs_waiting: jobsNeedingTidy().length }, ...stats(), usage_by_day: usageByDay(7) })));
+  }, () => run(() => ({ inboxes: gmailStatus(), paused: aiPause(), tidy: { running: tidyRunning(), jobs_waiting: jobsNeedingTidy().length }, prices: { running: pricesRunning(), ...priceStats() }, ...stats(), usage_by_day: usageByDay(7) })));
 
   server.registerTool("morning_brief", {
     title: "Morning brief",
@@ -129,6 +130,37 @@ export function registerAgentTools(server: McpServer) {
     inputSchema: { query: z.string().min(2).max(100) },
     annotations: { readOnlyHint: true },
   }, ({ query }) => run(() => findContacts(query)));
+
+  const priceRow = (p: ReturnType<typeof pricesForJob>[number] & { job_name?: string | null }) => ({
+    description: p.description, category: p.category, qty: p.qty, unit: p.unit, unit_price: p.unit_price, amount: p.amount,
+    side: p.side === "sell" ? "Shift 4 charged" : "Shift 4 was charged", by: p.issuer, to: p.bill_to,
+    document: `${p.doc_type ?? "document"}${p.doc_number ? ` ${p.doc_number}` : ""} (${p.doc})`, date: p.doc_date, document_total: p.doc_total,
+    job_id: p.job_id, ...(p.job_name ? { job: p.job_name } : {}), message_id: p.source_message_id,
+  });
+
+  server.registerTool("price_history", {
+    title: "Past pricing (rate lookup)",
+    description: "Looks up line items from past estimates, quotes and invoices found in email. Use it for \"what did I charge for an LED wall\", \"what does TAV charge me for uplights\", or to price a new estimate from past jobs. side=sell is what Shift 4 charged clients; side=cost is what vendors and crew charged Shift 4. Prices are copied from the documents as written.",
+    inputSchema: { query: z.string().min(2).max(120).describe("Gear, service or keyword, e.g. \"uplight\", \"LED wall\", \"A1\", \"CDJ\""), side: z.enum(["sell", "cost"]).optional(), limit: z.number().int().min(1).max(100).default(40) },
+    annotations: { readOnlyHint: true },
+  }, ({ query, side, limit }) => run(() => ({ matches: searchPrices(query, side, limit).map(priceRow), library: priceStats() })));
+
+  server.registerTool("job_pricing", {
+    title: "Pricing documents on a job",
+    description: "Every estimate, quote and invoice line the assistant has read for one job, both what Shift 4 charged and what it was charged.",
+    inputSchema: { job_id: z.number().int() },
+    annotations: { readOnlyHint: true },
+  }, ({ job_id }) => run(() => pricesForJob(job_id).map(priceRow)));
+
+  server.registerTool("read_price_documents", {
+    title: "Read new estimates and invoices for prices",
+    description: "Starts reading any estimate, quote or invoice PDFs in email that haven't been read for line items yet. Runs in the background and by itself through the day; returns how many are waiting.",
+    inputSchema: {},
+  }, () => run(() => {
+    const before = priceStats();
+    if (!pricesRunning()) pricesPending().catch((e) => console.error("[agent] prices", e));
+    return { started: true, ...before };
+  }));
 
   server.registerTool("tidy_job", {
     title: "Tidy a job",

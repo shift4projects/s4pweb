@@ -1,4 +1,5 @@
 import { sendEmail } from "../mail";
+import { brief } from "./brief";
 import { currentItemsForJob, getSetting, listJobs, recentMessages, setSetting, type Item } from "./store";
 
 // The daily digest: what's open on every active job, and what came in since yesterday.
@@ -10,6 +11,7 @@ const hourIn = (tz: string) => Number(new Intl.DateTimeFormat("en-US", { timeZon
 
 export function digestHtml(): { html: string; text: string; subject: string } | null {
   const today = todayIn(TZ());
+  const b = brief();
   const jobs = listJobs().map((j) => ({ ...j, items: currentItemsForJob(j.id) })).filter((j) => j.items.length || j.status === "inquiry" || j.status === "quoting");
   const since = new Date(Date.now() - 36 * 3600 * 1000).toISOString();
   const fresh = recentMessages(40).filter((m) => (m.sent_at ?? m.received_at) >= since && m.processed_at);
@@ -21,6 +23,9 @@ export function digestHtml(): { html: string; text: string; subject: string } | 
   <div style="font-family:Helvetica,Arial,sans-serif;max-width:620px;color:#111">
     <h2 style="margin:0 0 4px">Shift 4 daily digest</h2>
     <p style="margin:0 0 20px;color:#777">${esc(today)} · ${jobs.length} active job${jobs.length === 1 ? "" : "s"} · ${jobs.reduce((n, j) => n + j.items.length, 0)} open items</p>
+    ${b.events_next_14_days.length ? `<h3 style="margin:0 0 8px">Coming up</h3><ul style="margin:0 0 20px;padding-left:18px">${b.events_next_14_days.map((e) => `<li><b>${esc(e.event_date ?? "")}</b> ${esc(e.name)}${e.venue ? ` <span style="color:#888">· ${esc(e.venue)}</span>` : ""}</li>`).join("")}</ul>` : ""}
+    ${b.waiting_on_shift4.length ? `<div style="background:#fff9e8;border:1px solid #f0dca0;padding:12px 14px;margin-bottom:20px"><b>Waiting on a reply from you</b><ul style="margin:8px 0 0;padding-left:18px">${b.waiting_on_shift4.map((w) => `<li><b>${esc(w.from)}</b> · ${esc(w.job)} <span style="color:#888">· ${w.days_waiting === 0 ? "today" : `${w.days_waiting}d`}</span><br>${esc(w.summary ?? w.subject ?? "")}</li>`).join("")}</ul></div>` : ""}
+    ${b.money_owed_to_shift4.length ? `<div style="background:#f3f8f3;border:1px solid #c6dcc6;padding:12px 14px;margin-bottom:20px"><b>Owed to you (from email, check QuickBooks)</b><ul style="margin:8px 0 0;padding-left:18px">${b.money_owed_to_shift4.map((v) => `<li>${esc(v.amount ?? "amount not stated")} · ${esc(v.party)}${v.number ? ` · #${esc(v.number)}` : ""} <span style="color:#888">· ${esc(v.job)} · ${esc(v.status)}</span></li>`).join("")}</ul></div>` : ""}
     ${overdue.length ? `<div style="background:#fff3f3;border:1px solid #f3c2c2;padding:12px 14px;margin-bottom:20px"><b>Overdue</b><ul style="margin:8px 0 0;padding-left:18px">${overdue.map((it) => `<li>${line(it)} <span style="color:#888">· ${esc(it.job)}</span></li>`).join("")}</ul></div>` : ""}
     ${jobs.map((j) => `
       <div style="border-top:1px solid #e5e5e5;padding:14px 0">

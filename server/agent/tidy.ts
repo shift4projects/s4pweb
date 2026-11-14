@@ -20,6 +20,7 @@ const TidySchema = z.object({
     id: z.number(),
     why: z.enum(["answered", "done", "obsolete", "duplicate"]),
   })).describe("Open items that no longer need attention"),
+  keep: z.array(z.number()).describe("Only used when the prompt says THE EVENT IS OVER: ids of the open items that still need someone to act. Every other open item gets closed."),
   invoices: z.array(z.object({
     number: z.string().nullable().describe("Invoice or estimate-turned-invoice number as written, null if none given"),
     party: z.string().describe("Who it's with: the client being billed, or the vendor billing Shift 4"),
@@ -38,14 +39,18 @@ Rules:
 - Use only what the email summaries and items say. Never invent amounts, dates, names or outcomes. When something is unclear, leave it as it is.
 - Close an item when a later email answers it, completes it or replaces it ("answered" / "done"), when it repeats another open item ("duplicate"), or when it can no longer matter because the event is over ("obsolete": load-in times, gear lists, site visits, creative approvals for a past event).
 - Never close an item about money that is still unsettled (an unpaid invoice, a deposit not received, a disputed amount, a vendor bill not paid), or about gear, files or paperwork still owed after the event. Those stay open however old they are.
+- When the prompt says THE EVENT IS OVER, work the other way round: fill "keep" with the few items that still need action (unsettled money, gear, files or paperwork still owed, damage or insurance claims, open disputes, follow-ups someone promised after the event, a debrief not yet held). Everything not in "keep" is closed, so planning-stage questions, creative notes, gear lists, schedules and approvals for the finished event should simply be left out. Where two kept items say the same thing, keep one.
 - Status: "inquiry" = they asked, nothing quoted yet. "quoting" = a quote or estimate is out and undecided. "active" = booked or in production, event not finished. "done" = the event happened, or the conversation reached its natural end (an introduction, a call, a one-off question). "lost" = they went elsewhere, cancelled, or the event date passed with no sign Shift 4 was booked. Unpaid invoices do not keep a job "active": a finished event is "done" and the money is tracked in invoices.
 - Invoices: one entry per invoice. "paid" only when an email says payment was sent or received. "overdue" when a stated due date has passed with no sign of payment, or an email calls it overdue. If a revised invoice replaces an earlier one, list only the current one and say so in the note.
 - The summary is for Will, the owner, glancing at it on his phone. Plain words, real specifics, no filler.`;
 
+/** A dated event that finished at least 3 days ago: the tidy keeps a short list instead of closing item by item. */
+const isOver = (job: Job, today: string) => !!job.event_date && job.event_date.length === 10 && Date.parse(job.event_date) < Date.parse(today) - 3 * 86400000;
+
 function render(job: Job, today: string): string {
   const items = itemsForJob(job.id, "open");
   const mail = timelineForJob(job.id);
-  return `TODAY: ${today}
+  return `TODAY: ${today}${isOver(job, today) ? `\nTHE EVENT IS OVER (it was ${job.event_date}). Use "keep".` : ""}
 
 JOB #${job.id}: ${job.name}
 Client: ${job.client ?? "?"} | Event date: ${job.event_date ?? "?"} | Venue: ${job.venue ?? "?"} | Status now: ${job.status}
@@ -81,7 +86,15 @@ export async function tidyJob(jobId: number): Promise<{ job_id: number; name: st
   // Only ids that really are open items on this job get closed, whatever the model returns.
   const open = new Set(itemsForJob(jobId, "open").map((it) => it.id));
   let closed = 0;
-  for (const c of t.close) if (open.has(c.id)) { closeItem(c.id, c.why); closed++; }
+  const why = new Map(t.close.map((c) => [c.id, c.why]));
+  if (isOver(job, today)) {
+    // Finished event: everything not on the keep list is closed.
+    const keep = new Set(t.keep);
+    if (keep.size) { for (const id of open) if (!keep.has(id)) { closeItem(id, why.get(id) ?? "obsolete"); closed++; } }
+    else for (const c of t.close) if (open.has(c.id)) { closeItem(c.id, c.why); closed++; } // no keep list came back: fall back to the explicit closes
+  } else {
+    for (const c of t.close) if (open.has(c.id)) { closeItem(c.id, c.why); closed++; }
+  }
   updateJob(jobId, {
     summary: t.summary, status: t.status,
     client: job.client ? undefined : t.client ?? undefined, event_date: t.event_date ?? undefined, venue: job.venue ? undefined : t.venue ?? undefined,
