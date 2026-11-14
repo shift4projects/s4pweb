@@ -56,7 +56,9 @@ const SYSTEM = `You are the inbox assistant for Shift 4 Projects, an event techn
 Rules:
 - Only record facts stated in the email or its attachments. Never invent specs, prices, dates or names.
 - Match to an existing job when the client, event or thread clearly lines up; otherwise create a new one.
-- Items are short, specific and actionable. Skip pleasantries. Do not repeat existing open items; if the email answers one, put its id in "resolves".
+- Items are short, specific and actionable: something a person has to do, answer, decide or hit a date for. Plain facts (the event date, a colour scheme, specs, an amount already agreed) belong in the summary, not in items. Use "decision" only to record something that was actually agreed. Skip pleasantries. Do not repeat existing open items; if the email answers one, put its id in "resolves".
+- A job is an event or a piece of production work. A call, meeting, intro or calendar invite with someone tied to an existing job or client belongs to that job (record the meeting as one item with its date), not to a new job of its own. Only open a new job for a meeting when it is a new prospect with no job yet.
+- A vendor's quote or invoice for an event (for example Turunen AV / TAV billing Shift 4 for a client's show) belongs to that client event's job, not to a separate job named after the vendor.
 - Internal emails (from the Shift 4 team) still count: they often contain decisions and tasks.
 - Mail sent to accounting@ (or about invoices, deposits, payments, POs, vendor bills) is category "billing". Still tie it to the job when one is identifiable, and record amounts, invoice numbers and due dates exactly as written.
 - If the email is clearly not about any job (newsletter, receipt for a personal purchase, spam, personal life), set job to null and category "other", and record no items or contacts.

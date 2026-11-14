@@ -145,6 +145,20 @@ export function registerAgentTools(server: McpServer) {
     annotations: { readOnlyHint: true },
   }, ({ query, side, limit }) => run(() => ({ matches: searchPrices(query, side, limit).map(priceRow), library: priceStats() })));
 
+  server.registerTool("price_check", {
+    title: "Price a list of items from past jobs",
+    description: "For building an estimate: give it the gear and services on the new job and it returns, for each one, the most recent prices Shift 4 charged clients and the most recent prices vendors charged Shift 4. It returns past prices only; it does not make up a rate when there is no history for an item.",
+    inputSchema: { items: z.array(z.string().min(2).max(80)).min(1).max(25).describe("One short keyword per line item, e.g. [\"uplight\", \"LED wall\", \"A1\", \"CDJ-3000\"]") },
+    annotations: { readOnlyHint: true },
+  }, ({ items }) => run(() => ({
+    items: items.map((q) => {
+      const slim = (p: ReturnType<typeof searchPrices>[number]) => ({ description: p.description, qty: p.qty, unit: p.unit, unit_price: p.unit_price, amount: p.amount, date: p.doc_date, by: p.issuer, job: p.job_name, document: `${p.doc_type ?? "document"}${p.doc_number ? ` ${p.doc_number}` : ""}` });
+      const charged = searchPrices(q, "sell", 5).map(slim), paid = searchPrices(q, "cost", 5).map(slim);
+      return { item: q, shift4_charged: charged, shift4_was_charged: paid, ...(charged.length || paid.length ? {} : { note: "No past pricing found for this. Ask Will for a rate." }) };
+    }),
+    library: priceStats(),
+  })));
+
   server.registerTool("job_pricing", {
     title: "Pricing documents on a job",
     description: "Every estimate, quote and invoice line the assistant has read for one job, both what Shift 4 charged and what it was charged.",

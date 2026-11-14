@@ -195,7 +195,8 @@ const LAST_EMAIL = "(SELECT max(COALESCE(sent_at, received_at)) FROM agent_messa
 // A finished job stays current while email is still coming in on it (wrap-up, invoices, returns).
 const CURRENT_JOB = `j.status != 'lost' AND ((j.status != 'done' AND j.event_date >= date('now', '-14 days')) OR ${LAST_EMAIL} >= date('now', '-30 days'))`;
 // An item is fresh when its due date, or failing that the email it came from, is within the last 45 days.
-const FRESH_ITEM = "COALESCE(i.due, (SELECT COALESCE(sent_at, received_at) FROM agent_messages WHERE message_id = i.source_message_id), i.created_at) >= date('now', '-45 days')";
+// Decisions are a record of what was agreed, not something to do, so they never count as "open" work.
+const FRESH_ITEM = "i.type != 'decision' AND COALESCE(i.due, (SELECT COALESCE(sent_at, received_at) FROM agent_messages WHERE message_id = i.source_message_id), i.created_at) >= date('now', '-45 days')";
 
 /** Jobs by status, or by default only current ones (pass includeOld for every open job ever seen). */
 export const listJobs = (status?: string, includeOld = false) =>
@@ -293,9 +294,12 @@ const PRICE_COLS = "p.*, j.name AS job_name, j.event_date AS job_date";
 export function searchPrices(q: string, side?: string, limit = 40) {
   const words = q.toLowerCase().split(/\s+/).filter((w) => w.length > 1).slice(0, 6);
   const where = [...words.map(() => "lower(p.description || ' ' || COALESCE(p.category, '')) LIKE ?"), ...(side ? ["p.side = ?"] : [])].join(" AND ") || "1";
+  // LIKE finds the candidates; the check below keeps only hits at the start of a word ("led" must not match "unbilled").
+  const starts = words.map((w) => new RegExp(`(^|[^a-z0-9])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i"));
   return rows<PriceLine & { job_name: string | null; job_date: string | null }>(
     `SELECT ${PRICE_COLS} FROM agent_prices p LEFT JOIN agent_jobs j ON j.id = p.job_id WHERE ${where} ORDER BY COALESCE(p.doc_date, '') DESC, p.id LIMIT ?`,
-    ...words.map((w) => `%${w}%`), ...(side ? [side] : []), limit);
+    ...words.map((w) => `%${w}%`), ...(side ? [side] : []), limit * 4,
+  ).filter((p) => starts.every((re) => re.test(`${p.description} ${p.category ?? ""}`))).slice(0, limit);
 }
 export const pricesForJob = (jobId: number) =>
   rows<PriceLine>("SELECT p.* FROM agent_prices p WHERE p.job_id = ? ORDER BY COALESCE(p.doc_date, ''), p.doc, p.id", jobId);
