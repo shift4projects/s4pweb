@@ -71,6 +71,15 @@ for (const [col, ddl] of [["attempts", "INTEGER NOT NULL DEFAULT 0"], ["pdfs", "
 // One-time: emails that failed on the old forced-tool call get a fresh set of retries.
 // Emails that "failed" only because the Anthropic account ran out of credit get their retries back.
 db.exec("UPDATE agent_messages SET attempts = 0 WHERE processed_at IS NULL AND (error LIKE '%credit balance%' OR error LIKE '%overloaded%')");
+// Added for the tidy pass and the morning brief.
+for (const [table, col, ddl] of [
+  ["agent_jobs", "billing", "TEXT"],        // JSON: invoices seen in email for this job
+  ["agent_jobs", "tidied_at", "TEXT"],      // last time the whole job was re-read and cleaned up
+  ["agent_items", "closed_why", "TEXT"],    // answered | done | obsolete | duplicate (set by the tidy pass)
+  ["agent_messages", "needs_reply", "INTEGER"], // 1 when the email is waiting on an answer from Shift 4
+] as const) {
+  try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`); } catch { /* already there */ }
+}
 if (!(db.prepare("SELECT value FROM agent_settings WHERE key = 'reset_attempts_v1'").get())) {
   db.exec("UPDATE agent_messages SET attempts = 0, error = NULL WHERE processed_at IS NULL");
   db.prepare("INSERT OR REPLACE INTO agent_settings (key, value) VALUES ('reset_attempts_v1', '1')").run();
@@ -79,6 +88,12 @@ if (!(db.prepare("SELECT value FROM agent_settings WHERE key = 'reset_attempts_v
 export type Job = {
   id: number; name: string; client: string | null; event_date: string | null; venue: string | null;
   status: string; summary: string | null; notes: string | null; created_at: string; updated_at: string;
+  billing?: string | null; tidied_at?: string | null;
+};
+/** One invoice or bill seen in email. Amounts are kept exactly as written. */
+export type Invoice = {
+  number: string | null; party: string; direction: "receivable" | "payable"; amount: string | null;
+  status: "sent" | "paid" | "overdue" | "disputed" | "unknown"; due: string | null; note: string | null;
 };
 export type Item = {
   id: number; job_id: number; type: string; text: string; owner: string | null; due: string | null;
@@ -132,10 +147,13 @@ export const messagesInThread = (threadId: string) =>
 export const recentMessages = (limit = 20) =>
   rows<StoredMessage>("SELECT * FROM agent_messages ORDER BY COALESCE(sent_at, received_at) DESC LIMIT ?", limit);
 
-export function markProcessed(id: string, patch: { job_id: number | null; category: string; summary: string }) {
-  db.prepare("UPDATE agent_messages SET job_id = ?, category = ?, summary = ?, processed_at = datetime('now'), error = NULL, pdfs = NULL WHERE message_id = ?")
-    .run(patch.job_id, patch.category, patch.summary, id);
+export function markProcessed(id: string, patch: { job_id: number | null; category: string; summary: string; needs_reply?: boolean }) {
+  db.prepare("UPDATE agent_messages SET job_id = ?, category = ?, summary = ?, needs_reply = ?, processed_at = datetime('now'), error = NULL, pdfs = NULL WHERE message_id = ?")
+    .run(patch.job_id, patch.category, patch.summary, patch.needs_reply == null ? null : patch.needs_reply ? 1 : 0, id);
 }
+/** A job's whole email trail, oldest first (the most recent `limit` emails). */
+export const timelineForJob = (jobId: number, limit = 250) =>
+  rows<StoredMessage>("SELECT * FROM (SELECT * FROM agent_messages WHERE job_id = ? AND processed_at IS NOT NULL ORDER BY COALESCE(sent_at, received_at) DESC LIMIT ?) ORDER BY COALESCE(sent_at, received_at)", jobId, limit);
 /** Records an error without using up one of the email's retries (account-level problems). */
 export const noteError = (id: string, error: string) =>
   db.prepare("UPDATE agent_messages SET error = ? WHERE message_id = ?").run(error.slice(0, 500), id);
@@ -147,7 +165,8 @@ export const markFailed = (id: string, error: string) =>
 // "Current" = still in play: the event is upcoming or within the last 2 weeks, or there was email on it in the last 30 days.
 // The year-long backfill left plenty of jobs marked active/quoting that are long over; they stay searchable but out of the way.
 const LAST_EMAIL = "(SELECT max(COALESCE(sent_at, received_at)) FROM agent_messages WHERE job_id = j.id)";
-const CURRENT_JOB = `j.status NOT IN ('done', 'lost') AND (j.event_date >= date('now', '-14 days') OR ${LAST_EMAIL} >= date('now', '-30 days'))`;
+// A finished job stays current while email is still coming in on it (wrap-up, invoices, returns).
+const CURRENT_JOB = `j.status != 'lost' AND ((j.status != 'done' AND j.event_date >= date('now', '-14 days')) OR ${LAST_EMAIL} >= date('now', '-30 days'))`;
 // An item is fresh when its due date, or failing that the email it came from, is within the last 45 days.
 const FRESH_ITEM = "COALESCE(i.due, (SELECT COALESCE(sent_at, received_at) FROM agent_messages WHERE message_id = i.source_message_id), i.created_at) >= date('now', '-45 days')";
 
@@ -190,6 +209,7 @@ export function mergeJobs(into: number, from: number): Job {
     db.prepare("UPDATE agent_messages SET job_id = ? WHERE job_id = ?").run(into, from);
     db.prepare("UPDATE agent_items SET job_id = ? WHERE job_id = ?").run(into, from);
     db.prepare("DELETE FROM agent_jobs WHERE id = ?").run(from);
+    db.prepare("UPDATE agent_jobs SET tidied_at = NULL WHERE id = ?").run(into); // re-read the combined job on the next tidy
     try { db.prepare("DELETE FROM agent_fts WHERE kind = 'job' AND ref = ?").run(String(from)); } catch { /* no FTS */ }
     db.exec("COMMIT");
   } catch (e) { db.exec("ROLLBACK"); throw e; }
@@ -198,6 +218,43 @@ export function mergeJobs(into: number, from: number): Job {
     notes: [a.notes, b.notes, `Merged in "${b.name}" (#${from}).`].filter(Boolean).join("\n"),
   });
 }
+
+/** Jobs with email that arrived since they were last tidied (or never tidied), busiest first. */
+export const jobsNeedingTidy = (limit = 200) =>
+  rows<Job>(`SELECT j.* FROM agent_jobs j WHERE EXISTS (SELECT 1 FROM agent_messages m WHERE m.job_id = j.id AND m.processed_at > COALESCE(j.tidied_at, ''))
+    ORDER BY (SELECT count(*) FROM agent_messages m WHERE m.job_id = j.id) DESC LIMIT ?`, limit);
+export function markTidied(id: number, invoices: Invoice[]) {
+  db.prepare("UPDATE agent_jobs SET billing = ?, tidied_at = datetime('now') WHERE id = ?").run(JSON.stringify(invoices), id);
+}
+export const invoicesOf = (j: Job): Invoice[] => { try { return JSON.parse(j.billing || "[]"); } catch { return []; } };
+/** Every invoice still open (not paid), across all jobs, with the job it belongs to. */
+export function openInvoices(direction?: "receivable" | "payable") {
+  return rows<Job>("SELECT * FROM agent_jobs WHERE billing IS NOT NULL AND billing != '[]' ORDER BY COALESCE(event_date, '9999') DESC")
+    .flatMap((j) => invoicesOf(j).filter((v) => v.status !== "paid" && (!direction || v.direction === direction))
+      .map((v) => ({ job_id: j.id, job: j.name, event_date: j.event_date, ...v })));
+}
+
+/* ---------- the morning brief ---------- */
+
+const WHEN = "COALESCE(m.sent_at, m.received_at)";
+/** Threads on current jobs where the last word is `direction` (external = waiting on Shift 4, internal = waiting on them). */
+export function waitingThreads(direction: "external" | "internal", days = 14) {
+  // needs_reply is set on newer mail; older mail falls back to the kind of email it was.
+  const pending = direction === "external"
+    ? "(m.needs_reply = 1 OR (m.needs_reply IS NULL AND m.category IN ('inquiry', 'question', 'approval', 'change')))"
+    : "m.category IN ('question', 'approval', 'billing', 'inquiry')";
+  return rows<StoredMessage & { job_name: string }>(
+    `SELECT m.*, j.name AS job_name FROM agent_messages m JOIN agent_jobs j ON j.id = m.job_id
+     WHERE m.processed_at IS NOT NULL AND m.direction = ? AND ${CURRENT_JOB} AND ${pending}
+       AND ${WHEN} >= date('now', ?) AND ${WHEN} <= strftime('%Y-%m-%dT%H:%M:%S', 'now', ?)
+       AND NOT EXISTS (SELECT 1 FROM agent_messages x WHERE x.job_id = m.job_id AND COALESCE(x.sent_at, x.received_at) > ${WHEN}
+                        AND (x.thread_id = m.thread_id OR x.direction != m.direction))
+     ORDER BY ${WHEN}`, direction, `-${days} days`, direction === "external" ? "-3 hours" : "-2 days");
+}
+export const upcomingJobs = (days = 14) =>
+  rows<Job>("SELECT * FROM agent_jobs j WHERE j.status NOT IN ('done', 'lost') AND length(j.event_date) = 10 AND j.event_date >= date('now', '-1 day') AND j.event_date <= date('now', ?) ORDER BY j.event_date", `+${days} days`);
+export const newInquiries = (days = 7) =>
+  rows<Job>("SELECT * FROM agent_jobs j WHERE j.status = 'inquiry' AND j.created_at >= date('now', '-2 days') AND (SELECT min(COALESCE(sent_at, received_at)) FROM agent_messages WHERE job_id = j.id) >= date('now', ?) ORDER BY j.created_at DESC", `-${days} days`);
 
 /* ---------- items ---------- */
 
@@ -218,8 +275,8 @@ export function addItem(i: { job_id: number; type: string; text: string; owner?:
   index("item", String(item.id), item.text);
   return item;
 }
-export function closeItem(id: number): Item {
-  db.prepare("UPDATE agent_items SET status = 'done', closed_at = datetime('now') WHERE id = ?").run(id);
+export function closeItem(id: number, why?: string): Item {
+  db.prepare("UPDATE agent_items SET status = 'done', closed_at = datetime('now'), closed_why = ? WHERE id = ?").run(why ?? null, id);
   const it = row<Item>("SELECT * FROM agent_items WHERE id = ?", id);
   if (!it) throw new Error(`No item #${id}`);
   return it;
@@ -238,6 +295,19 @@ export const contactsForJob = (jobId: number) =>
     `SELECT DISTINCT c.email, c.name, c.company, c.role FROM agent_contacts c
      WHERE EXISTS (SELECT 1 FROM agent_messages m WHERE m.job_id = ? AND (lower(m.sender) LIKE '%' || c.email || '%' OR lower(m.recipients) LIKE '%' || c.email || '%'))`, jobId);
 
+/** Look someone up by name, company or email, most recently seen first, with the jobs they've been on. */
+export function findContacts(q: string, limit = 15) {
+  const like = `%${q.toLowerCase()}%`;
+  return rows<{ email: string; name: string | null; company: string | null; role: string | null; last_seen: string }>(
+    "SELECT * FROM agent_contacts WHERE lower(email) LIKE ? OR lower(COALESCE(name, '')) LIKE ? OR lower(COALESCE(company, '')) LIKE ? ORDER BY last_seen DESC LIMIT ?", like, like, like, limit,
+  ).map((c) => ({
+    ...c,
+    jobs: rows<{ id: number; name: string; event_date: string | null }>(
+      `SELECT DISTINCT j.id, j.name, j.event_date FROM agent_jobs j JOIN agent_messages m ON m.job_id = j.id
+       WHERE lower(m.sender) LIKE '%' || ? || '%' OR lower(m.recipients) LIKE '%' || ? || '%' ORDER BY COALESCE(j.event_date, '') DESC LIMIT 8`, c.email, c.email),
+  }));
+}
+
 /* ---------- search + settings ---------- */
 
 export function search(q: string, limit = 20) {
@@ -253,6 +323,21 @@ export function search(q: string, limit = 20) {
 export const getSetting = (k: string) => row<{ value: string }>("SELECT value FROM agent_settings WHERE key = ?", k)?.value;
 export const setSetting = (k: string, v: string) =>
   db.prepare("INSERT INTO agent_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(k, v);
+
+/** Running tally of what the assistant has used on the Anthropic account, per day. */
+export function addUsage(kind: string, u: { input_tokens?: number | null; output_tokens?: number | null; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null } | undefined) {
+  if (!u) return;
+  const key = `usage:${new Date().toISOString().slice(0, 10)}`;
+  const cur = JSON.parse(getSetting(key) || "{}") as Record<string, number>;
+  cur.calls = (cur.calls ?? 0) + 1;
+  cur[`${kind}_calls`] = (cur[`${kind}_calls`] ?? 0) + 1;
+  cur.input_tokens = (cur.input_tokens ?? 0) + (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+  cur.output_tokens = (cur.output_tokens ?? 0) + (u.output_tokens ?? 0);
+  setSetting(key, JSON.stringify(cur));
+}
+export const usageByDay = (days = 14) =>
+  rows<{ key: string; value: string }>("SELECT key, value FROM agent_settings WHERE key LIKE 'usage:%' ORDER BY key DESC LIMIT ?", days)
+    .map((r) => ({ day: r.key.slice(6), ...(JSON.parse(r.value) as Record<string, number>) }));
 
 export const stats = () => ({
   jobs: row<{ n: number }>("SELECT count(*) AS n FROM agent_jobs")?.n ?? 0,

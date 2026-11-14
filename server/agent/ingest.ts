@@ -76,6 +76,7 @@ export function processOne(messageId: string, attachmentsText = ""): Promise<voi
         sender: m.sender, recipients: m.recipients ?? "", subject: m.subject ?? "", sent_at: m.sent_at ?? m.received_at,
         body: m.body ?? "", attachments_text: attachmentsText, direction: m.direction, jobs, open_items: open,
         pdfs: m.pdfs ? JSON.parse(m.pdfs) : undefined,
+        likely_job: likely ? getJob(likely) ?? null : null,
         thread_context: earlier.map((e) => `- ${e.sent_at?.slice(0, 10)} ${e.sender}: ${e.summary ?? e.subject}`).join("\n"),
       });
 
@@ -95,7 +96,7 @@ export function processOne(messageId: string, attachmentsText = ""): Promise<voi
         for (const id of x.resolves) { try { closeItem(id); } catch { /* unknown id from the model */ } }
       }
       for (const c of x.contacts) if (c.email.includes("@")) touchContact(c);
-      markProcessed(m.message_id, { job_id: jobId, category: x.category, summary: x.summary });
+      markProcessed(m.message_id, { job_id: jobId, category: x.category, summary: x.summary, needs_reply: m.direction !== "internal" && x.needs_reply });
       console.log(`[agent] ${m.message_id} -> job ${jobId ?? "none"} (${x.category}), ${x.items.length} items`);
     } catch (e) {
       const msg = (e as Error).message ?? String(e);

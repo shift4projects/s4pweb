@@ -48,10 +48,16 @@ export async function sendDigest(force = false): Promise<"sent" | "empty" | "ski
 }
 
 /** Once a minute: send the digest at DIGEST_HOUR (local to DIGEST_TZ), and retry anything unprocessed. */
-export function startSchedule(retry: () => Promise<unknown>) {
+export function startSchedule(retry: () => Promise<unknown>, tidy?: () => Promise<unknown>) {
   const hour = Number(process.env.DIGEST_HOUR ?? 7);
+  const tidyHour = Number(process.env.TIDY_HOUR ?? 4); // before the digest, so the digest reads from a squared-up record
   setInterval(() => {
     if (hourIn(TZ()) >= hour) sendDigest().catch((e) => console.error("[agent] digest", e));
+    // Once a night: re-read every job that got email since its last tidy.
+    if (tidy && hourIn(TZ()) === tidyHour && getSetting("last_tidy") !== todayIn(TZ())) {
+      setSetting("last_tidy", todayIn(TZ()));
+      tidy().catch((e) => console.error("[agent] nightly tidy", e));
+    }
   }, 60_000).unref();
   setInterval(() => retry().catch((e) => console.error("[agent] retry", e)), 10 * 60_000).unref();
 }
